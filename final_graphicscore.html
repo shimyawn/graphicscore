@@ -1,0 +1,3640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Graphic Score Loop Station — Color &amp; Shape Version + Hand Version</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tone.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #090a0f;
+      color: #f8fafc;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      user-select: none;
+    }
+    canvas {
+      display: block;
+    }
+    .glass-panel {
+      background: rgba(15, 18, 28, 0.80);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .active-badge {
+      background: rgba(56, 189, 248, 0.25);
+      border-color: #38bdf8 !important;
+      color: #e0f2fe;
+      box-shadow: 0 0 14px rgba(56, 189, 248, 0.35);
+    }
+
+    /* Scrollbar styling */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.4); }
+
+    /* Collapsible Panel Logic */
+    .collapsed {
+      width: 4rem !important;
+      overflow: hidden;
+    }
+    .collapsed .hide-on-collapse {
+      opacity: 0;
+      pointer-events: none;
+      display: none !important;
+    }
+    .collapsed .center-on-collapse {
+      justify-content: center;
+      padding: 0;
+    }
+
+    /* Central Toast Notification */
+    #toast {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(9, 12, 22, 0.88);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.22);
+      padding: 1.25rem 2.5rem;
+      border-radius: 2rem;
+      font-size: 1.65rem;
+      font-weight: 800;
+      color: #fff;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.35s ease-out;
+      z-index: 100;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      box-shadow: 0 12px 42px rgba(0,0,0,0.65);
+      text-align: center;
+    }
+
+    /* Version Switch Pill Animation */
+    .version-switch-track {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      background: rgba(9, 11, 19, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 9999px;
+      padding: 3px;
+      cursor: pointer;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+    }
+    .version-switch-thumb {
+      position: absolute;
+      top: 3px;
+      bottom: 3px;
+      width: calc(50% - 3px);
+      border-radius: 9999px;
+      background: linear-gradient(135deg, #06b6d4, #6366f1);
+      transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.45);
+    }
+    .version-switch-track[data-version="hand"] .version-switch-thumb {
+      transform: translateX(100%);
+      background: linear-gradient(135deg, #ec4899, #8b5cf6);
+      box-shadow: 0 0 16px rgba(236, 72, 153, 0.45);
+    }
+  </style>
+</head>
+<body class="relative w-screen h-screen">
+
+  <!-- Hidden video element for webcam stream -->
+  <video id="webcam" class="hidden" playsinline muted></video>
+
+  <!-- Main Graphic Score Canvas -->
+  <canvas id="mainCanvas" class="w-full h-full"></canvas>
+
+  <!-- TOP-LEFT SINGLE VERSION SWITCH (Color & Shape Version <-> Hand Version) -->
+  <div class="fixed top-4 left-4 z-30 flex items-center gap-2">
+    <div id="versionSwitchBtn" class="version-switch-track w-[19.5rem] h-10 select-none" data-version="color_shape" title="Click to switch between Color & Shape Version and Hand Version">
+      <div class="version-switch-thumb"></div>
+      <div id="verLabelColor" class="relative z-10 flex-1 text-center text-[11px] font-extrabold tracking-wide text-white transition">
+        🎨 Color &amp; Shape Ver.
+      </div>
+      <div id="verLabelHand" class="relative z-10 flex-1 text-center text-[11px] font-extrabold tracking-wide text-slate-400 transition">
+        🖐 Hand Gesture Ver.
+      </div>
+    </div>
+    <div id="handToColorHintBadge" class="hidden glass-panel px-3 py-1.5 rounded-full text-[10px] font-bold text-pink-200 border border-pink-400/40 animate-pulse">
+      ✌️✌️ Both V-Signs → Color Ver.
+    </div>
+  </div>
+
+  <!-- Top Center HUD (Genre, Tempo & Artwork Guide Button) -->
+  <div class="fixed top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3">
+    <button id="genreHudBtn" title="Click or press Spacebar / Gesture to switch Genre" class="glass-panel px-5 py-2 rounded-full flex items-center gap-3 hover:border-cyan-400/50 active:scale-95 transition cursor-pointer">
+      <span id="genreHudHint" class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Genre (👈👉)</span>
+      <span id="genreDisplay" class="text-sm font-extrabold text-white tracking-wide">Electro Pop</span>
+      <span class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/30 text-indigo-200 font-semibold border border-indigo-400/30">Next ↻</span>
+    </button>
+    <div class="glass-panel px-4 py-1.5 rounded-full flex items-center gap-2.5">
+      <span id="bpmHudHint" class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">BPM (☝️☝️↕️)</span>
+      <button id="bpmDecBtn" class="w-5 h-5 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold text-slate-200 flex items-center justify-center cursor-pointer" title="Decrease BPM">-</button>
+      <span id="bpmDisplay" class="text-sm font-extrabold text-cyan-300 tracking-wide w-8 text-center">110</span>
+      <button id="bpmIncBtn" class="w-5 h-5 rounded-full bg-white/10 hover:bg-white/20 text-xs font-bold text-slate-200 flex items-center justify-center cursor-pointer" title="Increase BPM">+</button>
+    </div>
+    <button id="analysisBtn" class="glass-panel px-4 py-2 rounded-full text-xs font-bold text-indigo-300 hover:text-white hover:border-indigo-400/60 transition cursor-pointer flex items-center gap-1.5">
+      <span>✂️ 7 Shapes × 10 Colors (70) Guide</span>
+    </button>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast">Genre Changed</div>
+
+  <!-- Left Control & Guide Panel (Positioned right below the Top-Left Version Switch) -->
+  <div id="mainPanel" class="fixed top-16 left-4 z-20 w-[27.5rem] glass-panel rounded-2xl p-4 shadow-2xl flex flex-col max-h-[calc(100vh-5rem)]">
+    <div class="flex items-center justify-between mb-2 shrink-0">
+      <div class="hide-on-collapse">
+        <div class="flex items-center gap-2">
+          <h1 class="text-base font-extrabold tracking-wider text-white">GRAPHIC SCORE</h1>
+          <span id="panelVersionBadge" class="text-[10px] px-2 py-0.5 rounded-full bg-gradient-to-r from-rose-500/30 via-amber-500/30 to-cyan-500/30 border border-white/15 text-slate-200 font-semibold">7 SHAPES × 10 COLORS = 70</span>
+        </div>
+        <p id="panelSubtitle" class="text-[10px] text-slate-400 tracking-wide mt-0.5">■Square · 🍩Donut · ▲Triangle · ✚Cross · ━Line · ★Star · ┗L-Shape × 10 Colors</p>
+      </div>
+      <div class="flex items-center gap-2.5 center-on-collapse">
+        <span id="statusDot" class="w-3 h-3 rounded-full bg-rose-500 animate-pulse hide-on-collapse"></span>
+        <button id="collapseBtn" class="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white transition pointer-events-auto">
+          <svg id="collapseIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Shared Start Buttons -->
+    <div class="flex gap-2 mb-2 shrink-0 hide-on-collapse">
+      <button id="startBtn" class="flex-1 py-2 px-3 rounded-xl font-semibold text-xs bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-600 hover:to-cyan-600 text-white shadow-lg transition cursor-pointer">
+        📷 Start Camera &amp; Audio
+      </button>
+      <button id="simOnlyBtn" class="py-2 px-3 rounded-xl font-semibold text-xs bg-slate-800 hover:bg-slate-700 border border-white/15 text-cyan-300 transition cursor-pointer" title="Play immediately with virtual mouse shapes without a camera">
+        ✨ Virtual Mode
+      </button>
+    </div>
+    <p id="errorMsg" class="text-xs text-rose-400 mb-2 hidden shrink-0 hide-on-collapse"></p>
+
+    <!-- =================================================================== -->
+    <!-- VERSION 1 BODY: COLOR & SHAPE VERSION (7 SHAPES × 10 COLORS = 70)   -->
+    <!-- =================================================================== -->
+    <div id="colorShapeVersionBody" class="flex flex-col min-h-0 hide-on-collapse">
+      <!-- Quick 3-Way Detection Preset Bar -->
+      <div class="bg-slate-900/90 border border-white/10 rounded-xl p-1.5 mb-2 shrink-0">
+        <div class="flex items-center justify-between text-[9.5px] text-slate-400 px-1 mb-1">
+          <span class="font-bold text-slate-300">Detection Mode Presets</span>
+          <span id="activeModeDesc" class="text-cyan-300 font-semibold">7 Shapes × 10 Colors (All 70 Instruments)</span>
+        </div>
+        <div class="grid grid-cols-3 gap-1 text-[10px]">
+          <button id="presetBothBtn" class="py-1.5 px-2 rounded-lg bg-cyan-500/25 border border-cyan-400 text-white font-bold transition cursor-pointer">
+            Color + Shape (70)
+          </button>
+          <button id="presetColorOnlyBtn" class="py-1.5 px-2 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 hover:text-white font-semibold transition cursor-pointer" title="Color Only mode detects 10 colors on Square (■) props only">
+            🎨 Color Only (■ Square)
+          </button>
+          <button id="presetShapeOnlyBtn" class="py-1.5 px-2 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 hover:text-white font-semibold transition cursor-pointer" title="Shape Only mode detects enabled shapes regardless of color">
+            📐 Shape Only
+          </button>
+        </div>
+      </div>
+
+      <!-- Active Shapes Filter -->
+      <div class="bg-slate-900/90 border border-amber-400/25 rounded-xl p-2 mb-2 shrink-0">
+        <div class="flex items-center justify-between text-[9.5px] mb-1">
+          <span class="font-bold text-amber-300">✂️ Active Shape Filter (Click to Enable / Disable Shapes)</span>
+          <div class="flex gap-1">
+            <button id="shapePresetBasic3Btn" class="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-400/40 text-amber-200 hover:bg-amber-500/30 font-semibold cursor-pointer" title="Only detect Square, Triangle, and Donut for rock-solid stability">Basic 3 (■▲🍩)</button>
+            <button id="shapePresetAll7Btn" class="px-1.5 py-0.5 rounded bg-slate-800 border border-white/15 text-slate-300 hover:text-white font-semibold cursor-pointer">All 7</button>
+          </div>
+        </div>
+        <div id="shapeFilterBar" class="grid grid-cols-7 gap-1 text-[9.5px]">
+          <button data-filter-shape="square" class="shape-filter-btn py-1 rounded bg-emerald-500/25 border border-emerald-400 text-emerald-200 font-bold cursor-pointer" title="Toggle Square Detection">■Sq</button>
+          <button data-filter-shape="ring" class="shape-filter-btn py-1 rounded bg-emerald-500/25 border border-emerald-400 text-emerald-200 font-bold cursor-pointer" title="Toggle Donut Detection">🍩Ring</button>
+          <button data-filter-shape="triangle" class="shape-filter-btn py-1 rounded bg-emerald-500/25 border border-emerald-400 text-emerald-200 font-bold cursor-pointer" title="Toggle Triangle Detection">▲Tri</button>
+          <button data-filter-shape="cross" class="shape-filter-btn py-1 rounded bg-emerald-500/25 border border-emerald-400 text-emerald-200 font-bold cursor-pointer" title="Toggle Cross Detection">✚Cross</button>
+          <button data-filter-shape="line" class="shape-filter-btn py-1 rounded bg-emerald-500/25 border border-emerald-400 text-emerald-200 font-bold cursor-pointer" title="Toggle Line Detection">━Line</button>
+          <button data-filter-shape="star" class="shape-filter-btn py-1 rounded bg-emerald-500/25 border border-emerald-400 text-emerald-200 font-bold cursor-pointer" title="Toggle Star Detection">★Star</button>
+          <button data-filter-shape="lshape" class="shape-filter-btn py-1 rounded bg-emerald-500/25 border border-emerald-400 text-emerald-200 font-bold cursor-pointer" title="Toggle L-Shape Detection">┗L-Shp</button>
+        </div>
+        <div class="flex items-center justify-between mt-1.5 pt-1.5 border-t border-white/10 text-[9.5px]">
+          <button id="toggleStickyLockBtn" class="px-2 py-0.5 rounded bg-emerald-500/25 border border-emerald-400/60 text-emerald-200 font-bold cursor-pointer" title="When ON, latched loops NEVER get turned off by new shapes until Clear All">
+            🔒 Sticky Latch (Never Auto-Off): ON
+          </button>
+          <button id="toggleWhiteColorBtn" class="px-2 py-0.5 rounded bg-slate-800 border border-white/15 text-slate-400 font-semibold cursor-pointer" title="Ignore White by default so bright walls/lights never false-trigger">
+            ⚪ White Detect: OFF
+          </button>
+        </div>
+      </div>
+
+      <!-- Feature Toggles (Color & Shape Version) -->
+      <div class="grid grid-cols-2 gap-1.5 mb-2 text-[11px] shrink-0">
+        <button id="toggleColorBtn" class="py-1.5 px-2 rounded-lg border border-emerald-500/50 bg-emerald-500/20 text-emerald-200 font-medium transition cursor-pointer">
+          10-Color Mode: ON
+        </button>
+        <button id="toggleShapeBtn" class="py-1.5 px-2 rounded-lg border border-emerald-500/50 bg-emerald-500/20 text-emerald-200 font-medium transition cursor-pointer">
+          Shape Mode: ON
+        </button>
+        <button id="toggleGestureBtn" class="py-1.5 px-2 rounded-lg border border-emerald-500/50 bg-emerald-500/20 text-emerald-200 font-medium transition cursor-pointer">
+          Hand Macros (BPM/Genre): ON
+        </button>
+        <div class="grid grid-cols-2 gap-1">
+          <button id="toggleBgBtn" class="py-1.5 px-1.5 rounded-lg border border-slate-600 bg-slate-800/70 text-slate-300 text-[10px] font-medium transition cursor-pointer">
+            Hide Cam: OFF
+          </button>
+          <button id="dualPopupBtn" class="py-1.5 px-1.5 rounded-lg border border-indigo-500/50 bg-indigo-500/20 text-indigo-200 text-[10px] font-medium hover:bg-indigo-500/30 transition cursor-pointer">
+            Dual Monitor
+          </button>
+        </div>
+      </div>
+
+      <!-- CV Controller (With Color Sensitivity & Face/Skin Reject Filter) -->
+      <div class="bg-slate-900/80 border border-cyan-400/25 rounded-xl p-2 mb-2 shrink-0">
+        <div class="flex justify-between items-center text-[10px] text-slate-300 mb-1">
+          <span class="font-bold text-cyan-300">🎛️ CV Controller (Brightness · Contrast · Edge · Sensitivity)</span>
+          <div class="flex items-center gap-1">
+            <button id="toggleSkinFilterBtn" class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/25 border border-emerald-400/60 text-emerald-200 font-bold cursor-pointer" title="Filters out human face/skin tones so only vivid colored paper shapes are detected">
+              🙅 Skin Filter: ON
+            </button>
+            <button id="cvResetBtn" class="text-[9px] px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-slate-200 cursor-pointer">Reset CV</button>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[9.5px]">
+          <div class="flex items-center gap-1.5">
+            <span class="text-slate-400 w-14">Bright</span>
+            <input id="cvBrightSlider" type="range" min="-40" max="60" value="8" class="w-full accent-cyan-400 h-1 bg-slate-700 rounded-lg cursor-pointer" />
+            <span id="cvBrightVal" class="font-mono text-cyan-300 w-7 text-right">+8</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="text-slate-400 w-14">Contrast</span>
+            <input id="cvContrastSlider" type="range" min="80" max="240" value="135" class="w-full accent-cyan-400 h-1 bg-slate-700 rounded-lg cursor-pointer" />
+            <span id="cvContrastVal" class="font-mono text-cyan-300 w-8 text-right">135%</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="text-slate-400 w-14">Sat Boost</span>
+            <input id="cvSatSlider" type="range" min="80" max="260" value="145" class="w-full accent-pink-400 h-1 bg-slate-700 rounded-lg cursor-pointer" />
+            <span id="cvSatVal" class="font-mono text-pink-300 w-8 text-right">145%</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="text-slate-400 w-14">Edge</span>
+            <input id="cvEdgeSlider" type="range" min="0" max="200" value="140" class="w-full accent-amber-400 h-1 bg-slate-700 rounded-lg cursor-pointer" />
+            <span id="cvEdgeVal" class="font-mono text-amber-300 w-8 text-right">140%</span>
+          </div>
+        </div>
+
+        <!-- NEW: Dedicated Color Sensitivity Slider (Low = Vivid Paper Cutouts Only, High = Detects Faint Colors) -->
+        <div class="flex items-center gap-2 mt-1.5 pt-1.5 border-t border-white/10 text-[9.5px]">
+          <span class="text-emerald-300 font-bold shrink-0" title="Lower this if faces/clothes get detected; raise it if dim paper colors are missed">🎯 Color Sens</span>
+          <input id="cvColorSensSlider" type="range" min="10" max="100" value="42" class="w-full accent-emerald-400 h-1 bg-slate-700 rounded-lg cursor-pointer" />
+          <span id="cvColorSensVal" class="font-mono text-emerald-300 w-9 text-right">42%</span>
+          <span class="text-[8.5px] text-slate-400 shrink-0">(Low = Paper Only)</span>
+        </div>
+
+        <div class="flex items-center gap-2 mt-1 pt-1 border-t border-white/10">
+          <span class="text-[9.5px] text-slate-400 shrink-0">Min Blob Size</span>
+          <input id="sensSlider" type="range" min="10" max="120" value="28" class="w-full accent-cyan-400 h-1 bg-slate-700 rounded-lg cursor-pointer" />
+          <span id="sensVal" class="text-[9.5px] font-mono text-cyan-300 w-6 text-right">28</span>
+          <span id="liveDetectBadge" class="text-[9px] text-emerald-300 font-mono truncate ml-1">CV Ready</span>
+        </div>
+        <!-- 10 Color Live Indicators -->
+        <div class="grid grid-cols-5 gap-1 mt-1.5 pt-1.5 border-t border-white/10 text-center text-[9px] font-bold">
+          <div id="pill-red" class="py-0.5 rounded bg-red-500/20 text-red-300 border border-red-500/40 transition">Red</div>
+          <div id="pill-orange" class="py-0.5 rounded bg-orange-500/20 text-orange-300 border border-orange-500/40 transition">Orange</div>
+          <div id="pill-yellow" class="py-0.5 rounded bg-yellow-400/20 text-yellow-200 border border-yellow-400/40 transition">Yellow</div>
+          <div id="pill-lime" class="py-0.5 rounded bg-lime-500/20 text-lime-300 border border-lime-500/40 transition">Lime</div>
+          <div id="pill-green" class="py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 transition">Green</div>
+          <div id="pill-cyan" class="py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 transition">Cyan</div>
+          <div id="pill-blue" class="py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/40 transition">Blue</div>
+          <div id="pill-purple" class="py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 transition">Purple</div>
+          <div id="pill-pink" class="py-0.5 rounded bg-pink-500/20 text-pink-300 border border-pink-500/40 transition">Pink</div>
+          <div id="pill-white" class="py-0.5 rounded bg-white/20 text-white border border-white/40 transition opacity-35">White(OFF)</div>
+        </div>
+      </div>
+
+      <!-- 70 Instruments Browser -->
+      <div class="border-t border-white/10 pt-2 flex flex-col min-h-0">
+        <div class="flex justify-between items-center mb-1.5 shrink-0">
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Select Shape Tab → 10 Color Instruments (70 Total)</span>
+          <button id="clearAllBtn" class="text-[11px] text-rose-400 hover:text-rose-300 underline cursor-pointer">Clear All</button>
+        </div>
+
+        <!-- Active Loops Quick Bar -->
+        <div id="activeLoopsBar" class="flex flex-wrap gap-1 mb-1.5 min-h-[22px] max-h-14 overflow-y-auto p-1 rounded-lg bg-slate-950/70 border border-white/10 shrink-0">
+          <span class="text-[9.5px] text-slate-500 px-1">No active loops playing (Show a shape prop or click below)</span>
+        </div>
+
+        <!-- 7 Shape Category Tabs -->
+        <div id="shapeTabsBar" class="grid grid-cols-7 gap-1 mb-1.5 shrink-0 text-[10px]">
+          <button data-tab="square" class="shape-tab-btn py-1 rounded-lg bg-cyan-500/25 border border-cyan-400 text-white font-bold cursor-pointer" title="■ Square (10 Colors)">■Sq</button>
+          <button data-tab="ring" class="shape-tab-btn py-1 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 hover:text-white font-semibold cursor-pointer" title="🍩 Hollow Donut Ring (10 Colors)">🍩Ring</button>
+          <button data-tab="triangle" class="shape-tab-btn py-1 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 hover:text-white font-semibold cursor-pointer" title="▲ Triangle (10 Colors)">▲Tri</button>
+          <button data-tab="cross" class="shape-tab-btn py-1 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 hover:text-white font-semibold cursor-pointer" title="✚ Cross (10 Colors)">✚Cross</button>
+          <button data-tab="line" class="shape-tab-btn py-1 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 hover:text-white font-semibold cursor-pointer" title="━ Straight Line (10 Colors)">━Line</button>
+          <button data-tab="star" class="shape-tab-btn py-1 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 hover:text-white font-semibold cursor-pointer" title="★ Star (10 Colors)">★Star</button>
+          <button data-tab="lshape" class="shape-tab-btn py-1 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 hover:text-white font-semibold cursor-pointer" title="┗ L-Shape (10 Colors)">┗L-Shp</button>
+        </div>
+
+        <div id="shapeTabDesc" class="text-[9.5px] font-bold text-cyan-300 mb-1 shrink-0 px-0.5">
+          ■ Square (Harmony &amp; Synth Chords) — 10 Distinct Color Instruments
+        </div>
+
+        <!-- Dynamic 10-Color Badge List -->
+        <div id="loopList" class="space-y-1 text-[11px] overflow-y-auto pr-1 pb-2"></div>
+      </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- VERSION 2 BODY: HAND GESTURE VERSION (12 GESTURES + 3 COLOR MODES)  -->
+    <!-- =================================================================== -->
+    <div id="handVersionBody" class="hidden flex-col min-h-0 hide-on-collapse">
+      <!-- Special Hand Gesture Banner to Switch to Color & Shape Version -->
+      <div class="bg-gradient-to-r from-cyan-500/20 via-indigo-500/20 to-pink-500/20 border border-cyan-400/40 rounded-xl p-2.5 mb-2.5 shrink-0">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-[11px] font-extrabold text-cyan-200 flex items-center gap-1.5">
+              <span>✌️✌️ Hold Both Hands V-Sign (Peace)</span>
+            </div>
+            <p class="text-[10px] text-slate-300 mt-0.5">Hold <b>✌️ + ✌️</b> with two hands for 0.8s to switch to <b>🎨 Color &amp; Shape Version</b>!</p>
+          </div>
+          <button id="quickSwitchToColorBtn" class="px-2.5 py-1 rounded-lg bg-cyan-500/30 hover:bg-cyan-500/50 border border-cyan-300/50 text-[10px] font-bold text-white shrink-0 cursor-pointer">
+            Switch →
+          </button>
+        </div>
+      </div>
+
+      <!-- Feature Toggles (Hand Version) -->
+      <div class="grid grid-cols-2 gap-2 mb-3 text-[11px] shrink-0">
+        <button id="handToggleColorBtn" class="py-2 px-2 rounded-lg border border-emerald-500/50 bg-emerald-500/20 text-emerald-200 font-medium transition cursor-pointer">
+          Color Mode (R/Y/B): ON
+        </button>
+        <button id="handToggleGestureBtn" class="py-2 px-2 rounded-lg border border-emerald-500/50 bg-emerald-500/20 text-emerald-200 font-medium transition cursor-pointer">
+          Gesture Mode: ON
+        </button>
+        <button id="handToggleBgBtn" class="py-2 px-2 rounded-lg border border-slate-600 bg-slate-800/70 text-slate-300 font-medium transition cursor-pointer">
+          Hide Webcam: OFF
+        </button>
+        <button id="handDualPopupBtn" class="py-2 px-2 rounded-lg border border-indigo-500/50 bg-indigo-500/20 text-indigo-200 font-medium hover:bg-indigo-500/30 transition cursor-pointer">
+          Dual Monitor
+        </button>
+        <button id="spareGenreBtn" class="col-span-2 py-2 px-3 rounded-lg border border-pink-500/50 bg-gradient-to-r from-pink-500/20 to-purple-500/20 hover:from-pink-500/30 hover:to-purple-500/30 text-pink-200 font-semibold transition flex items-center justify-between cursor-pointer">
+          <span>🎵 Switch Genre (Spare Button)</span>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white">Space / Click</span>
+        </button>
+      </div>
+
+      <!-- 12 Hand Gesture Guide -->
+      <div class="border-t border-white/10 pt-2.5 flex flex-col min-h-0">
+        <div class="flex justify-between items-center mb-1.5 shrink-0">
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Hold 0.7s to Stack. Move Y for Pitch</span>
+          <button id="handClearAllBtn" class="text-[11px] text-rose-400 hover:text-rose-300 underline cursor-pointer">Clear All</button>
+        </div>
+
+        <div id="gestureList" class="space-y-1 text-xs overflow-y-auto pr-2 pb-2">
+          <div id="hand-badge-1" data-hkey="1" class="hand-loop-badge p-1.5 rounded-lg border border-transparent flex justify-between items-center transition cursor-pointer" title="1 Finger: Bass">
+            <span>☝️ <b>1 Finger</b> : Bass Groove</span><span class="text-[10px] opacity-60">OFF</span>
+          </div>
+          <div id="hand-badge-2" data-hkey="2" class="hand-loop-badge p-1.5 rounded-lg border border-transparent flex justify-between items-center transition cursor-pointer" title="2 Fingers: Chords">
+            <span>✌️ <b>2 Fingers</b> : Synth Chords</span><span class="text-[10px] opacity-60">OFF</span>
+          </div>
+          <div id="hand-badge-3" data-hkey="3" class="hand-loop-badge p-1.5 rounded-lg border border-transparent flex justify-between items-center transition cursor-pointer" title="3 Fingers: Arpeggio">
+            <span>🤟 <b>3 Fingers</b> : Pluck Arp</span><span class="text-[10px] opacity-60">OFF</span>
+          </div>
+          <div id="hand-badge-4" data-hkey="4" class="hand-loop-badge p-1.5 rounded-lg border border-transparent flex justify-between items-center transition cursor-pointer" title="4 Fingers: Snare">
+            <span>🖐 <b>4 Fingers</b> : Snare Beat</span><span class="text-[10px] opacity-60">OFF</span>
+          </div>
+          <div id="hand-badge-thumb" data-hkey="thumb" class="hand-loop-badge p-1.5 rounded-lg border border-transparent flex justify-between items-center transition cursor-pointer" title="Thumbs Up: Lead">
+            <span>👍 <b>Thumbs Up</b> : Sparkle Lead</span><span class="text-[10px] opacity-60">OFF</span>
+          </div>
+          <div id="hand-badge-rock" data-hkey="rock" class="hand-loop-badge p-1.5 rounded-lg border border-transparent flex justify-between items-center transition cursor-pointer" title="Rock Sign: Acid">
+            <span>🤘 <b>Rock Sign</b> : Acid Synth</span><span class="text-[10px] opacity-60">OFF</span>
+          </div>
+          <div id="hand-badge-ok" data-hkey="ok" class="hand-loop-badge p-1.5 rounded-lg border border-transparent flex justify-between items-center transition cursor-pointer" title="OK Sign: Marimba">
+            <span>👌 <b>OK Sign</b> : Marimba Loop</span><span class="text-[10px] opacity-60">OFF</span>
+          </div>
+          <div id="hand-badge-call" data-hkey="call" class="hand-loop-badge p-1.5 rounded-lg border border-transparent flex justify-between items-center transition cursor-pointer" title="Call Sign: Glitch">
+            <span>🤙 <b>Call Sign</b> : Glitch Hi-Hat</span><span class="text-[10px] opacity-60">OFF</span>
+          </div>
+          <div id="hand-badge-pinch" data-hkey="pinch" class="hand-loop-badge p-1.5 rounded-lg border border-transparent flex justify-between items-center transition cursor-pointer" title="Pinch: Toms">
+            <span>🤏 <b>Pinch</b> : Tom Drum Fills</span><span class="text-[10px] opacity-60">OFF</span>
+          </div>
+          <div id="hand-badge-gun" data-hkey="gun" class="hand-loop-badge p-1.5 rounded-lg border border-transparent flex justify-between items-center transition cursor-pointer" title="Gun: Trap Hats">
+            <span>👈 <b>Gun Shape</b> : Trap Hats</span><span class="text-[10px] opacity-60">OFF</span>
+          </div>
+          <div id="hand-badge-spiderman" data-hkey="spiderman" class="hand-loop-badge p-1.5 rounded-lg border border-transparent flex justify-between items-center transition cursor-pointer" title="Spiderman: Pad">
+            <span>🕷️ <b>Spiderman</b> : Sweep Pad</span><span class="text-[10px] opacity-60">OFF</span>
+          </div>
+          <div id="hand-badge-pinky" data-hkey="pinky" class="hand-loop-badge p-1.5 rounded-lg border border-transparent flex justify-between items-center transition cursor-pointer" title="Pinky: Chime">
+            <span>🦇 <b>Pinky Up</b> : Crystal Chime</span><span class="text-[10px] opacity-60">OFF</span>
+          </div>
+
+          <div class="p-1.5 mt-2 rounded-lg bg-cyan-500/10 border border-cyan-400/30 text-cyan-200 flex justify-between items-center">
+            <span>✌️✌️ <b>Both Hands V-Sign</b> : To Color Ver.</span>
+            <span class="text-[10px] font-bold">SWITCH</span>
+          </div>
+          <div class="p-1.5 mt-1 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 flex justify-between items-center sticky bottom-0 backdrop-blur-md">
+            <span>✊✊ <b>Double Fists</b> : Stop All</span>
+            <span class="text-[10px]">RESET</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right Floating Virtual Prop & Hand Gesture Tester (Visible in Color & Shape Version) -->
+  <div id="simPanel" class="fixed bottom-36 right-4 z-20 w-80 glass-panel rounded-2xl p-3.5 shadow-2xl">
+    <div class="flex items-center justify-between mb-2">
+      <div>
+        <h2 class="text-xs font-bold text-white flex items-center gap-1.5">
+          <span>🎯 Virtual 7-Shape × 10-Color Simulator</span>
+        </h2>
+        <p class="text-[10px] text-slate-400">Test all 7 shapes (🍩Donut, ▲Triangle, etc.) × 10 colors</p>
+      </div>
+      <button id="toggleSimBtn" class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-800 text-slate-300 border border-white/15 cursor-pointer">
+        OFF
+      </button>
+    </div>
+
+    <div id="simControls" class="space-y-2.5 opacity-50 pointer-events-none transition">
+      <!-- 10 Colors Picker -->
+      <div>
+        <div class="text-[9.5px] text-cyan-300 font-semibold mb-1">🎨 Select 10 Colors (Applies to all shapes · No Black)</div>
+        <div class="grid grid-cols-5 gap-1">
+          <button data-color="red" class="sim-color-btn h-6 rounded bg-red-500 ring-2 ring-white text-[9px] font-bold text-white shadow cursor-pointer" title="Red">Red</button>
+          <button data-color="orange" class="sim-color-btn h-6 rounded bg-orange-500 text-[9px] font-bold text-white shadow cursor-pointer" title="Orange">Orange</button>
+          <button data-color="yellow" class="sim-color-btn h-6 rounded bg-yellow-400 text-[9px] font-bold text-slate-900 shadow cursor-pointer" title="Yellow">Yellow</button>
+          <button data-color="lime" class="sim-color-btn h-6 rounded bg-lime-400 text-[9px] font-bold text-slate-900 shadow cursor-pointer" title="Lime">Lime</button>
+          <button data-color="green" class="sim-color-btn h-6 rounded bg-emerald-500 text-[9px] font-bold text-white shadow cursor-pointer" title="Green">Green</button>
+          <button data-color="cyan" class="sim-color-btn h-6 rounded bg-cyan-400 text-[9px] font-bold text-slate-900 shadow cursor-pointer" title="Cyan">Cyan</button>
+          <button data-color="blue" class="sim-color-btn h-6 rounded bg-blue-500 text-[9px] font-bold text-white shadow cursor-pointer" title="Blue">Blue</button>
+          <button data-color="purple" class="sim-color-btn h-6 rounded bg-purple-500 text-[9px] font-bold text-white shadow cursor-pointer" title="Purple">Purple</button>
+          <button data-color="pink" class="sim-color-btn h-6 rounded bg-pink-500 text-[9px] font-bold text-white shadow cursor-pointer" title="Pink">Pink</button>
+          <button data-color="white" class="sim-color-btn h-6 rounded bg-white text-[9px] font-bold text-slate-900 border border-slate-300 shadow cursor-pointer" title="White">White</button>
+        </div>
+      </div>
+
+      <!-- 7 Shape Picker -->
+      <div>
+        <div class="text-[9.5px] text-amber-300 font-semibold mb-1">✂️ Select 7 Shapes (10 unique sounds per shape)</div>
+        <div class="grid grid-cols-4 gap-1 text-[10px]">
+          <button data-shape="square" class="sim-shape-btn py-1.5 rounded-lg bg-cyan-500/25 border border-cyan-400 text-white font-bold cursor-pointer">■ Square</button>
+          <button data-shape="ring" class="sim-shape-btn py-1.5 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 font-semibold cursor-pointer">🍩 Donut</button>
+          <button data-shape="triangle" class="sim-shape-btn py-1.5 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 font-semibold cursor-pointer">▲ Triangle</button>
+          <button data-shape="cross" class="sim-shape-btn py-1.5 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 font-semibold cursor-pointer">✚ Cross</button>
+          <button data-shape="line" class="sim-shape-btn py-1.5 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 font-semibold cursor-pointer">━ Line</button>
+          <button data-shape="star" class="sim-shape-btn py-1.5 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 font-semibold cursor-pointer">★ Star</button>
+          <button data-shape="lshape" class="sim-shape-btn py-1.5 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 font-semibold cursor-pointer col-span-2">┗ L-Shape</button>
+        </div>
+      </div>
+
+      <!-- Simulated Hand Macro Mode -->
+      <div class="pt-1.5 border-t border-white/10 space-y-1">
+        <div class="text-[9.5px] text-slate-400 font-semibold">🖐 Test Hand Macros (Pinch Disabled)</div>
+        <div class="grid grid-cols-3 gap-1 text-[10px]">
+          <button id="simIndexBpmBtn" class="py-1 px-1.5 rounded bg-slate-800/90 border border-white/10 text-slate-300 hover:text-white cursor-pointer">
+            ☝️☝️ Index BPM
+          </button>
+          <button id="simGenreGestureBtn" class="py-1 px-1.5 rounded bg-slate-800/90 border border-white/10 text-slate-300 hover:text-white cursor-pointer">
+            👈👉 Genre
+          </button>
+          <button id="simFistResetBtn" class="py-1 px-1.5 rounded bg-rose-500/20 border border-rose-500/30 text-rose-300 hover:text-white cursor-pointer">
+            ✊✊ Stop All
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Craftable Shape & Dual-Version Guide Modal -->
+  <div id="analysisModal" class="fixed inset-0 z-50 bg-black/75 hidden items-center justify-center p-4">
+    <div class="glass-panel p-6 rounded-2xl max-w-2xl w-full max-h-[86vh] overflow-y-auto border border-white/20 shadow-2xl">
+      <div class="flex justify-between items-center mb-4 border-b border-white/10 pb-3">
+        <div>
+          <h3 class="text-lg font-extrabold text-white">🎨 Color &amp; Shape Version + 🖐 Hand Version Dual Guide</h3>
+          <p class="text-xs text-slate-400">Switch anytime via Top-Left Switch or ✌️✌️ Dual V-Sign Gesture in Hand Version</p>
+        </div>
+        <button id="closeAnalysisBtn" class="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-bold text-white cursor-pointer">Close</button>
+      </div>
+
+      <div class="space-y-4 text-xs text-slate-200 leading-relaxed">
+        <div class="p-3.5 rounded-xl bg-slate-900/80 border border-cyan-400/30">
+          <h4 class="font-bold text-cyan-300 mb-1.5">1. Switching Between the Two Versions &amp; CV Sensitivity</h4>
+          <ul class="list-disc pl-4 space-y-1 text-slate-300">
+            <li><b>Top-Left Switch</b>: Click the pill switch at the top-left of the screen anytime to toggle between <b>🎨 Color &amp; Shape Version (70 Instruments)</b> and <b>🖐 Hand Gesture Version (12 Hand Loops + 3 Color Triggers)</b>.</li>
+            <li><b>Hand Gesture to Switch Version (✌️✌️ Dual V-Sign)</b>: While in <b>Hand Version</b>, raise <b>both hands in a V-Sign / Peace Gesture (✌️ + ✌️)</b> for ~0.8 seconds to automatically switch into the <b>Color &amp; Shape Version</b>.</li>
+            <li><b>🎯 Color Sens &amp; 🙅 Skin Filter</b>: Lower <b>Color Sens</b> (e.g., 25%–45%) and keep <b>🙅 Skin Filter: ON</b> so human faces, hands, and room backgrounds are ignored and only vivid colored paper cutouts are recognized.</li>
+          </ul>
+        </div>
+
+        <div class="p-3.5 rounded-xl bg-slate-900/80 border border-amber-400/30">
+          <h4 class="font-bold text-amber-300 mb-2">2. 🎨 Color &amp; Shape Version (7 Shapes × 10 Colors = 70 Instruments)</h4>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+            <div class="p-2 rounded bg-black/40 border border-white/10">
+              <b class="text-cyan-200">① ■ Square (10 Colors) — Synth Chords &amp; Bass</b><br/>
+              Deep Kick, Funky Clav, Warm Chords, Acid 303, Emerald Arp, Glass Keys, Ocean Pad, Saw Lead, Pastel Keys, Choir Pad.
+            </div>
+            <div class="p-2 rounded bg-black/40 border border-white/10">
+              <b class="text-emerald-200">② 🍩 Hollow Donut Ring (10 Colors) — Resonant Drones &amp; Pads</b><br/>
+              Detected via center hole &amp; 8-ray check. 10 harmonic sub drones and evolving ambient swell pads.
+            </div>
+            <div class="p-2 rounded bg-black/40 border border-white/10">
+              <b class="text-amber-200">③ ▲ Triangle (10 Colors) — Drum &amp; Percussion Beats</b><br/>
+              Analog Snare, Arcade Clap, Trap Rimshot, Tribe Tom, Jungle Break, Ice Snap, Dub Snare, Glitch Snare, Handclap, Shaker.
+            </div>
+            <div class="p-2 rounded bg-black/40 border border-white/10">
+              <b class="text-rose-200">④ ✚ Cross (10 Colors) — Marimba, Kalimba &amp; Woodblock</b><br/>
+              Two strips crossed at 90° (<code>+</code>). 10 percussive mallet ostinatos and FM wood percussion loops.
+            </div>
+            <div class="p-2 rounded bg-black/40 border border-white/10">
+              <b class="text-sky-200">⑤ ━ Straight Line (10 Colors) — Laser Sweep &amp; Hi-Hat Roll</b><br/>
+              Single straight strip. 10 distinct hi-hat groove subdivisions and laser synth sweeps.
+            </div>
+            <div class="p-2 rounded bg-black/40 border border-white/10">
+              <b class="text-purple-200">⑥ ★ Star (10 Colors) — Cosmic Starlight Arpeggio</b><br/>
+              5-point star or 3 crossed strips (<code>*</code>). 10 shimmering high-octave bell &amp; arpeggio sequences.
+            </div>
+            <div class="p-2 rounded bg-black/40 border border-white/10 md:col-span-2">
+              <b class="text-orange-200">⑦ ┗ L-Shape (10 Colors) — Glitch Chop &amp; Syncopated Stab</b><br/>
+              Two strips connected at a 90° corner (<code>L</code>). 10 syncopated synth stabs and micro-glitch loops.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dual Monitor Modal -->
+  <div id="popupModal" class="fixed inset-0 z-50 bg-black/70 hidden items-center justify-center">
+    <div class="glass-panel p-6 rounded-2xl max-w-sm text-center">
+      <h3 class="text-base font-bold mb-2">Popup Blocked</h3>
+      <p class="text-xs text-slate-300 mb-4">Please allow popups in your browser to open the Dual Monitor output window.</p>
+      <button id="closeModalBtn" class="px-4 py-2 bg-indigo-500 rounded-lg text-xs font-semibold cursor-pointer">OK</button>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // 1. UNIFIED DUAL-VERSION METADATA & STATE
+    //    appVersion: 'color_shape' (Version 1) | 'hand' (Version 2)
+    // =========================================================================
+    var COLOR_KEYS = ['red', 'orange', 'yellow', 'lime', 'green', 'cyan', 'blue', 'purple', 'pink', 'white'];
+    var SHAPE_KEYS = ['square', 'ring', 'triangle', 'cross', 'line', 'star', 'lshape'];
+
+    var colorMeta = {
+      red:    { hex: '#ef4444', en: 'Red',    short: 'Red',    badgeBg: 'bg-red-500',    scaleOffset: 0 },
+      orange: { hex: '#f97316', en: 'Orange', short: 'Orange', badgeBg: 'bg-orange-500', scaleOffset: 2 },
+      yellow: { hex: '#facc15', en: 'Yellow', short: 'Yellow', badgeBg: 'bg-yellow-400', scaleOffset: 4 },
+      lime:   { hex: '#84cc16', en: 'Lime',   short: 'Lime',   badgeBg: 'bg-lime-400',   scaleOffset: 5 },
+      green:  { hex: '#10b981', en: 'Green',  short: 'Green',  badgeBg: 'bg-emerald-500',scaleOffset: 7 },
+      cyan:   { hex: '#06b6d4', en: 'Cyan',   short: 'Cyan',   badgeBg: 'bg-cyan-400',   scaleOffset: 9 },
+      blue:   { hex: '#3b82f6', en: 'Blue',   short: 'Blue',   badgeBg: 'bg-blue-500',   scaleOffset: 10 },
+      purple: { hex: '#a855f7', en: 'Purple', short: 'Purple', badgeBg: 'bg-purple-500', scaleOffset: 12 },
+      pink:   { hex: '#ec4899', en: 'Pink',   short: 'Pink',   badgeBg: 'bg-pink-500',   scaleOffset: 14 },
+      white:  { hex: '#f8fafc', en: 'White',  short: 'White',  badgeBg: 'bg-white',      scaleOffset: 15 }
+    };
+
+    var shapeMeta = {
+      square:   { symbol: '■', en: 'Square',   title: '■ Square (Harmony & Bass Synths) — 10 Distinct Color Instruments' },
+      ring:     { symbol: '🍩', en: 'Donut',    title: '🍩 Hollow Donut Ring (Resonant Drone & Halo Pad) — 10 Distinct Color Instruments' },
+      triangle: { symbol: '▲', en: 'Triangle', title: '▲ Triangle (Drum Beats & Percussion) — 10 Distinct Color Instruments' },
+      cross:    { symbol: '✚', en: 'Cross',    title: '✚ Cross (Mallet, Pluck & Woodblock) — 10 Distinct Color Instruments' },
+      line:     { symbol: '━', en: 'Line',     title: '━ Straight Line (Laser Sweep & Hi-Hat Groove) — 10 Distinct Color Instruments' },
+      star:     { symbol: '★', en: 'Star',     title: '★ Star (Cosmic Starlight Arpeggio) — 10 Distinct Color Instruments' },
+      lshape:   { symbol: '┗', en: 'L-Shape',  title: '┗ L-Shape (Glitch Stabs & Acid Chops) — 10 Distinct Color Instruments' }
+    };
+
+    var INSTRUMENT_NAMES = {
+      square: {
+        red: 'Deep Sub & Kick', orange: 'Funky Clav Bass', yellow: 'Warm Analog Chords', lime: 'Acid 303 Squelch',
+        green: 'Emerald Pluck Arp', cyan: 'Glass Poly Keys', blue: 'Deep Ocean Pad', purple: 'Royal Saw Lead',
+        pink: 'Pastel Dream Keys', white: 'Crystal Choir Pad'
+      },
+      ring: {
+        red: 'Lava Sub Drone', orange: 'Amber Warm Halo', yellow: 'Solar Ring Swell', lime: 'Neon Bio Drone',
+        green: 'Forest Moss Pad', cyan: 'Glacier Ring Choir', blue: 'Abyssal Donut Drone', purple: 'Nebula Vortex Pad',
+        pink: 'Rose Quartz Halo', white: 'Aether Pure Drone'
+      },
+      triangle: {
+        red: 'Punchy Electro Snare', orange: 'Crunch Clap Beat', yellow: 'Crispy Rim & Snare', lime: 'Acid Tribe Tom Beat',
+        green: 'Jungle Break Snare', cyan: 'Ice Snap Percussion', blue: 'Deep Dub Snare', purple: 'Cyber Glitch Snare',
+        pink: 'Pop Handclap Groove', white: 'Stadium Shaker & Clap'
+      },
+      cross: {
+        red: 'Ruby Woodblock Sync', orange: 'Sunset Marimba Ostinato', yellow: 'Golden Kalimba Pluck', lime: 'Bamboo Log Perc',
+        green: 'Jade Xylophone Loop', cyan: 'Aqua Glass Mallet', blue: 'Cobalt Vibraphone', purple: 'Amethyst FM Bell',
+        pink: 'Coral Toy Piano', white: 'Ivory Music Box'
+      },
+      line: {
+        red: 'Crimson Laser Sweep', orange: 'Plasma Hat Roll', yellow: 'Flash Strobe Hats', lime: 'Toxic Acid Line',
+        green: 'Matrix Pulse Hats', cyan: 'Cyber Zip Shaker', blue: 'Sonic Wave Hats', purple: 'Ultraviolet Riser',
+        pink: 'Magenta Ribbon Arp', white: 'White Noise Jet Hats'
+      },
+      star: {
+        red: 'Supernova Bell Arp', orange: 'Comet Tail Sparkle', yellow: 'Polaris Gold Chime', lime: 'Aurora Twinkle Arp',
+        green: 'Vega Emerald Star', cyan: 'Sirius Ice Crystal', blue: 'Andromeda Starlight', purple: 'Pulsar Mystic Harp',
+        pink: 'Stardust Fairy Bell', white: 'Diamond Nova Chime'
+      },
+      lshape: {
+        red: 'Redline Glitch Chop', orange: 'Rust Syncopated Stab', yellow: 'Volt Corner Bitcrush', lime: 'Mutant Step Bass',
+        green: 'Circuit Bend Pluck', cyan: 'Data Stream Stutter', blue: 'Subzero L-Matrix', purple: 'Warp Gate Brass Stab',
+        pink: 'Bubblegum Vox Chop', white: 'Prism Ghost Echo'
+      }
+    };
+
+    var COLOR_RHYTHM_PATTERNS = [
+      [1, 0, 0, 1, 0, 0, 1, 0], // red
+      [1, 0, 1, 0, 0, 1, 0, 1], // orange
+      [1, 0, 0, 0, 1, 0, 1, 0], // yellow
+      [1, 1, 0, 1, 0, 1, 1, 0], // lime
+      [1, 0, 1, 1, 0, 1, 0, 1], // green
+      [0, 1, 1, 0, 1, 0, 1, 1], // cyan
+      [1, 0, 0, 1, 1, 0, 0, 1], // blue
+      [1, 1, 0, 0, 1, 1, 0, 1], // purple
+      [0, 1, 0, 1, 1, 0, 1, 0], // pink
+      [1, 1, 1, 0, 1, 1, 0, 1]  // white
+    ];
+
+    var state = {
+      appVersion: 'color_shape', // 'color_shape' or 'hand'
+      isRunning: false,
+      cameraActive: false,
+      colorEnabled: true,
+      shapeEnabled: true,
+      gestureEnabled: true,
+      hideWebcam: false,
+      pixelThreshold: 28,
+      beatPulse: 0,
+      selectedShapeTab: 'square',
+
+      // CV Controller Parameters (Color & Shape Version)
+      cvBrightness: 8,
+      cvContrast: 1.35,
+      cvSaturation: 1.45,
+      cvEdgeStrength: 1.40,
+      cvColorSens: 42,          // 10 .. 100 (Lower = strict vivid paper only; Higher = detects faint/pastel colors)
+      skinFilterEnabled: true,  // Rejects human face/skin tones (R>G>B warm skin & rosy skin)
+      whiteColorEnabled: false,
+      stickyLockMode: true,
+
+      enabledShapes: {
+        square: true, ring: true, triangle: true, cross: true, line: true, star: true, lshape: true
+      },
+
+      // Genre & Tempo State
+      genreIdx: 0,
+      currentBpm: 110,
+      smoothedBpmFloat: 110,
+      genreHoldFrames: 0,
+      genreCooldownFrames: 0,
+      doubleFistFrames: 0,
+      dualIndexHoldFrames: 0,
+      bpmControlActive: false,
+      stretching: null,
+
+      // 10 Live Color Indicators (Color & Shape Version)
+      colorActive: {
+        red: false, orange: false, yellow: false, lime: false, green: false,
+        cyan: false, blue: false, purple: false, pink: false, white: false
+      },
+      colorPos: {
+        red:    { x: 0.15, y: 0.4 }, orange: { x: 0.23, y: 0.4 }, yellow: { x: 0.31, y: 0.4 },
+        lime:   { x: 0.39, y: 0.4 }, green:  { x: 0.47, y: 0.4 }, cyan:   { x: 0.55, y: 0.4 },
+        blue:   { x: 0.63, y: 0.4 }, purple: { x: 0.71, y: 0.4 }, pink:   { x: 0.79, y: 0.4 },
+        white:  { x: 0.87, y: 0.4 }
+      },
+
+      // 70 Loops Map (Color & Shape Version)
+      loops: {},
+      trackHold: {},
+      colorShapeVotes: {},
+
+      // Virtual Simulator State
+      sim: {
+        enabled: false,
+        indexBpmMode: false,
+        color: 'red',
+        shape: 'square',
+        x: 0.5,
+        y: 0.45,
+        insideCanvas: false
+      },
+
+      scoreHistory: [],
+
+      // =====================================================================
+      // HAND VERSION STATE (12 Hand Loops + 3 Ambient Color Triggers)
+      // =====================================================================
+      handColorActive: { red: false, yellow: false, blue: false },
+      handColorPos: { red: { x: 0.3, y: 0.4 }, yellow: { x: 0.7, y: 0.4 }, blue: { x: 0.5, y: 0.6, width: 180 } },
+      handLoops: {
+        '1': { active: false, x: 0.20, y: 0.35, color: '#38bdf8', name: 'Bass Groove' },
+        '2': { active: false, x: 0.35, y: 0.30, color: '#a855f7', name: 'Synth Chords' },
+        '3': { active: false, x: 0.55, y: 0.30, color: '#34d399', name: 'Pluck Arp' },
+        '4': { active: false, x: 0.70, y: 0.35, color: '#f472b6', name: 'Snare Beat' },
+        'thumb': { active: false, x: 0.45, y: 0.50, color: '#facc15', name: 'Sparkle Lead' },
+        'rock': { active: false, x: 0.65, y: 0.60, color: '#f87171', name: 'Acid Synth' },
+        'ok': { active: false, x: 0.40, y: 0.65, color: '#2dd4bf', name: 'Marimba' },
+        'call': { active: false, x: 0.55, y: 0.65, color: '#818cf8', name: 'Glitch Hat' },
+        'pinch': { active: false, x: 0.30, y: 0.45, color: '#8b5cf6', name: 'Tom Fills' },
+        'gun': { active: false, x: 0.75, y: 0.50, color: '#f97316', name: 'Trap Hats' },
+        'spiderman': { active: false, x: 0.80, y: 0.30, color: '#10b981', name: 'Sweep Pad' },
+        'pinky': { active: false, x: 0.80, y: 0.65, color: '#ec4899', name: 'Crystal Chime' }
+      },
+      handTracker: {
+        Left: { gesture: null, frames: 0, cooldown: 0, x: 0.5, y: 0.5 },
+        Right: { gesture: null, frames: 0, cooldown: 0, x: 0.5, y: 0.5 }
+      },
+      openPalmFrames: 0,
+      versionSwitchGestureFrames: 0,
+      handScoreHistory: []
+    };
+
+    // Populate all 70 (7 shapes × 10 colors) slots
+    SHAPE_KEYS.forEach((shape, sIdx) => {
+      COLOR_KEYS.forEach((color, cIdx) => {
+        const key = `${shape}_${color}`;
+        const cInfo = colorMeta[color];
+        const sInfo = shapeMeta[shape];
+        const defaultX = 0.14 + (cIdx / 9) * 0.72;
+        const defaultY = 0.22 + (sIdx / 6) * 0.52;
+        state.loops[key] = {
+          key: key,
+          active: false,
+          x: defaultX,
+          y: defaultY,
+          color: cInfo.hex,
+          colorKey: color,
+          colorIdx: cIdx,
+          shape: shape,
+          shapeIdx: sIdx,
+          name: INSTRUMENT_NAMES[shape][color],
+          label: `${cInfo.en} ${sInfo.en} ${sInfo.symbol}`
+        };
+        state.trackHold[key] = { frames: 0, cooldown: 0 };
+      });
+    });
+
+    var HOLD_FRAMES_REQUIRED = 18;
+    var COOLDOWN_FRAMES = 28;
+    var SAME_SPOT_RADIUS = 0.18;
+    var GENRE_HOLD_REQUIRED = 35;
+    var GENRE_COOLDOWN_FRAMES = 75;
+    var FIST_HOLD_REQUIRED = 28;
+    var INDEX_LOCK_FRAMES = 18;
+    var VERSION_SWITCH_HOLD_FRAMES = 22;
+    var SCORE_HEIGHT = 128;
+
+    // --- UNIFIED 3 DYNAMIC GENRES CONFIGURATION ---
+    var genreData = [
+      {
+        name: "Electro Pop",
+        bpm: 110,
+        scale: ['C3', 'D3', 'Eb3', 'F3', 'G3', 'Ab3', 'Bb3', 'C4', 'D4', 'Eb4', 'F4', 'G4', 'Ab4', 'Bb4', 'C5', 'D5', 'Eb5', 'G5', 'C6'],
+        bassScale: ['C1', 'Eb1', 'F1', 'G1', 'Ab1', 'Bb1', 'C2', 'D2', 'Eb2', 'F2', 'G2', 'Bb2'],
+        bass: ['C2', 'C2', 'Eb2', 'G2', 'F2', null, 'G2', 'Bb1'],
+        chords: [['C4', 'Eb4', 'G4', 'Bb4'], ['Ab3', 'C4', 'Eb4', 'G4'], ['F3', 'Ab3', 'C4', 'Eb4'], ['G3', 'B3', 'D4', 'F4']],
+        arp: ['C5', 'Eb5', 'G5', 'Bb5', 'C6', 'Bb5', 'G5', 'Eb5'],
+        snare: [null, 1, null, 1],
+        thumb: ['G5', null, 'F5', 'Eb5', 'D5', null, 'C5', 'Bb4'],
+        rock: ['C3', 'C4', null, 'C3', 'Eb3', 'G3', 'C4', 'Bb3'],
+        ok: ['C4', 'G4', 'Eb4', 'Bb4', 'C5', 'G4', 'Eb4', 'G4'],
+        call: [1, 1, 0, 1, 1, 0, 1, 1],
+        pinch: [null, 'G2', 'F2', null, 'C2', 'C2', null, 'G1'],
+        gun: [1, 0.5, 1, 0.5, 1, 1, 0.5, 0.5],
+        pinky: ['C6', null, null, 'G6', null, 'Bb6', null, 'C7'],
+        colorKick: 'C1',
+        spidermanChord: ['C4', 'G4', 'Bb4']
+      },
+      {
+        name: "Dreamcore",
+        bpm: 76,
+        scale: ['F3', 'G3', 'A3', 'C4', 'D4', 'E4', 'F4', 'G4', 'A4', 'C5', 'D5', 'E5', 'F5', 'G5', 'A5', 'C6', 'D6', 'E6', 'G6'],
+        bassScale: ['F1', 'G1', 'A1', 'Bb1', 'C2', 'D2', 'E2', 'F2', 'G2', 'A2', 'C3', 'D3'],
+        bass: ['C2', null, 'Eb2', null, 'G1', null, 'Ab1', 'G1'],
+        chords: [['C4', 'D4', 'Eb4', 'G4'], ['Ab3', 'Bb3', 'C4', 'Eb4'], ['F3', 'G3', 'Ab3', 'C4'], ['G3', 'A3', 'B3', 'D4']],
+        arp: ['C5', null, 'G5', null, 'D5', 'Eb5', null, 'C5'],
+        snare: [null, null, 1, null],
+        thumb: ['G5', 'F5', 'Eb5', 'D5', 'C5', 'Bb4', 'Ab4', 'G4'],
+        rock: ['C3', null, 'Eb3', null, 'G3', null, 'Bb3', null],
+        ok: ['C4', 'Eb4', 'G4', 'Bb4', 'C5', 'Bb4', 'G4', 'Eb4'],
+        call: [1, 0, 0, 1, 0, 0, 1, 0],
+        pinch: [null, 'G2', null, 'C2', null, null, 'F1', 'G1'],
+        gun: [1, 1, 1, 1, 0.5, 0.5, 1, 1],
+        pinky: ['C6', null, 'Eb6', null, 'G6', null, 'Bb6', 'C7'],
+        colorKick: 'C1',
+        spidermanChord: ['C4', 'Eb4', 'G4', 'D5']
+      },
+      {
+        name: "8-Bit Retro",
+        bpm: 136,
+        scale: ['C3', 'D3', 'E3', 'G3', 'A3', 'B3', 'C4', 'D4', 'E4', 'G4', 'A4', 'B4', 'C5', 'D5', 'E5', 'G5', 'A5', 'C6', 'E6'],
+        bassScale: ['C1', 'E1', 'F1', 'G1', 'A1', 'B1', 'C2', 'D2', 'E2', 'F2', 'G2', 'A2'],
+        bass: ['C2', 'C3', 'C2', 'C3', 'F2', 'F3', 'G2', 'G3'],
+        chords: [['C4', 'E4', 'G4'], ['A3', 'C4', 'E4'], ['F3', 'A3', 'C4'], ['G3', 'B3', 'D4']],
+        arp: ['C5', 'E5', 'G5', 'C6', 'E6', 'C6', 'G5', 'E5'],
+        snare: [null, 1, null, 1],
+        thumb: ['C5', 'C5', 'E5', 'E5', 'G5', 'G5', 'C6', 'C6'],
+        rock: ['C3', 'C3', 'E3', 'C3', 'G3', 'E3', 'C4', 'G3'],
+        ok: ['C5', 'G4', 'E4', 'C4', 'A4', 'E4', 'C4', 'A3'],
+        call: [1, 1, 1, 1, 1, 1, 1, 1],
+        pinch: ['C3', 'G2', 'E2', 'C2', 'G1', 'C2', 'E2', 'G2'],
+        gun: [1, 0, 1, 0, 1, 0, 1, 1],
+        pinky: ['C6', 'E6', 'G6', 'B6', 'C7', 'B6', 'G6', 'E6'],
+        colorKick: 'C2',
+        spidermanChord: ['C4', 'E4', 'G4', 'C5']
+      }
+    ];
+
+    // --- DOM Elements ---
+    var video = document.getElementById('webcam');
+    var canvas = document.getElementById('mainCanvas');
+    var ctx = canvas.getContext('2d');
+    var startBtn = document.getElementById('startBtn');
+    var simOnlyBtn = document.getElementById('simOnlyBtn');
+    var statusDot = document.getElementById('statusDot');
+    var errorMsg = document.getElementById('errorMsg');
+    var genreDisplay = document.getElementById('genreDisplay');
+    var bpmDisplay = document.getElementById('bpmDisplay');
+    var liveDetectBadge = document.getElementById('liveDetectBadge');
+    var toast = document.getElementById('toast');
+
+    // Offscreen CV processing canvases
+    var cvCanvas = document.createElement('canvas');
+    cvCanvas.width = 140;
+    cvCanvas.height = 105;
+    var cvCtx = cvCanvas.getContext('2d', { willReadFrequently: true });
+
+    var handColorCanvas = document.createElement('canvas');
+    handColorCanvas.width = 80;
+    handColorCanvas.height = 60;
+    var handColorCtx = handColorCanvas.getContext('2d', { willReadFrequently: true });
+
+    var dualWindow = null, dualCanvas = null, dualCtx = null;
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      if (dualCanvas && dualWindow && !dualWindow.closed) {
+        dualCanvas.width = dualWindow.innerWidth;
+        dualCanvas.height = dualWindow.innerHeight;
+      }
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.style.opacity = 1;
+      setTimeout(() => { toast.style.opacity = 0; }, 2100);
+    }
+
+    // =========================================================================
+    // VERSION SWITCHER (TOP-LEFT SWITCH & ✌️✌️ HAND GESTURE TRIGGER)
+    // =========================================================================
+    function setAppVersion(targetVer) {
+      if (state.appVersion === targetVer) return;
+      state.appVersion = targetVer;
+      state.stretching = null;
+      state.bpmControlActive = false;
+      state.versionSwitchGestureFrames = 0;
+
+      if (targetVer !== 'hand' && handAudio.blueDrone) {
+        handAudio.blueDrone.volume.rampTo(-100, 0.2);
+      }
+
+      const switchTrack = document.getElementById('versionSwitchBtn');
+      const verLabelColor = document.getElementById('verLabelColor');
+      const verLabelHand = document.getElementById('verLabelHand');
+      const colorBody = document.getElementById('colorShapeVersionBody');
+      const handBody = document.getElementById('handVersionBody');
+      const simPanel = document.getElementById('simPanel');
+      const panelBadge = document.getElementById('panelVersionBadge');
+      const panelSub = document.getElementById('panelSubtitle');
+      const genreHint = document.getElementById('genreHudHint');
+      const bpmHint = document.getElementById('bpmHudHint');
+      const hintBadge = document.getElementById('handToColorHintBadge');
+
+      switchTrack.setAttribute('data-version', targetVer);
+
+      if (targetVer === 'color_shape') {
+        verLabelColor.className = 'relative z-10 flex-1 text-center text-[11px] font-extrabold tracking-wide text-white transition';
+        verLabelHand.className = 'relative z-10 flex-1 text-center text-[11px] font-extrabold tracking-wide text-slate-400 transition';
+        colorBody.classList.remove('hidden');
+        colorBody.classList.add('flex');
+        handBody.classList.add('hidden');
+        handBody.classList.remove('flex');
+        simPanel.classList.remove('hidden');
+        hintBadge.classList.add('hidden');
+        panelBadge.textContent = '7 SHAPES × 10 COLORS = 70';
+        panelSub.textContent = '■Square · 🍩Donut · ▲Triangle · ✚Cross · ━Line · ★Star · ┗L-Shape × 10 Colors';
+        genreHint.textContent = 'Genre (👈👉)';
+        bpmHint.textContent = 'BPM (☝️☝️↕️)';
+        showToast('🎨 Color & Shape Version');
+      } else {
+        verLabelColor.className = 'relative z-10 flex-1 text-center text-[11px] font-extrabold tracking-wide text-slate-400 transition';
+        verLabelHand.className = 'relative z-10 flex-1 text-center text-[11px] font-extrabold tracking-wide text-white transition';
+        colorBody.classList.add('hidden');
+        colorBody.classList.remove('flex');
+        handBody.classList.remove('hidden');
+        handBody.classList.add('flex');
+        simPanel.classList.add('hidden');
+        hintBadge.classList.remove('hidden');
+        panelBadge.textContent = '12 HAND GESTURES + R/Y/B';
+        panelSub.textContent = '🖐 Open Palm / [Space]: Genre | 🤏↕️ Pinch Y: BPM | ✌️✌️: To Color Ver.';
+        genreHint.textContent = 'Genre (🖐/Space)';
+        bpmHint.textContent = 'BPM (🤏↕️)';
+        showToast('🖐 Hand Gesture Version');
+      }
+    }
+
+    document.getElementById('versionSwitchBtn').addEventListener('click', () => {
+      setAppVersion(state.appVersion === 'color_shape' ? 'hand' : 'color_shape');
+    });
+    document.getElementById('quickSwitchToColorBtn').addEventListener('click', () => {
+      setAppVersion('color_shape');
+    });
+
+    function setBpmImmediate(newBpm) {
+      const clamped = Math.max(60, Math.min(200, Math.round(newBpm)));
+      state.currentBpm = clamped;
+      state.smoothedBpmFloat = clamped;
+      bpmDisplay.textContent = clamped;
+      if (state.isRunning && audioInitialized) {
+        Tone.Transport.bpm.rampTo(clamped, 0.2);
+      }
+    }
+
+    function updateBpmLowSensitivity(normY) {
+      if (normY > 0.43 && normY < 0.57) return;
+      const clampedY = Math.max(0.15, Math.min(0.85, normY));
+      const rawTarget = 70 + ((0.85 - clampedY) / 0.70) * 90;
+      state.smoothedBpmFloat = state.smoothedBpmFloat * 0.97 + rawTarget * 0.03;
+      const quantized = Math.round(state.smoothedBpmFloat / 2) * 2;
+      if (Math.abs(quantized - state.currentBpm) >= 2) {
+        state.currentBpm = Math.max(70, Math.min(160, quantized));
+        bpmDisplay.textContent = state.currentBpm;
+        if (state.isRunning && audioInitialized) {
+          Tone.Transport.bpm.rampTo(state.currentBpm, 0.25);
+        }
+      }
+    }
+
+    function switchGenre() {
+      state.genreIdx = (state.genreIdx + 1) % genreData.length;
+      const newGenre = genreData[state.genreIdx];
+      setBpmImmediate(newGenre.bpm);
+      genreDisplay.textContent = newGenre.name;
+      showToast(`Genre: ${newGenre.name}`);
+      state.openPalmFrames = 0;
+    }
+
+    document.getElementById('genreHudBtn').addEventListener('click', switchGenre);
+    document.getElementById('spareGenreBtn').addEventListener('click', switchGenre);
+    document.getElementById('bpmDecBtn').addEventListener('click', () => setBpmImmediate(state.currentBpm - 4));
+    document.getElementById('bpmIncBtn').addEventListener('click', () => setBpmImmediate(state.currentBpm + 4));
+
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' || e.key === 'g' || e.key === 'G') {
+        if (document.activeElement && document.activeElement.tagName === 'BUTTON') {
+          document.activeElement.blur();
+        }
+        e.preventDefault();
+        switchGenre();
+      }
+    });
+
+    function getPitchZone(yPos) {
+      if (yPos < 0.35) return { shift: 12, label: 'HIGH' };
+      if (yPos > 0.65) return { shift: -12, label: 'LOW' };
+      return { shift: 0, label: 'MID' };
+    }
+
+    function tNote(note, yPos, extraSemitones = 0) {
+      if (!note) return null;
+      return Tone.Frequency(note).transpose(getPitchZone(yPos).shift + extraSemitones).toNote();
+    }
+
+    function tChord(chordArr, yPos) {
+      return chordArr.map(n => tNote(n, yPos));
+    }
+
+    // =========================================================================
+    // 2. UNIFIED TONE.JS SYNTHESIZER ENGINE (BOTH VERSIONS READY)
+    // =========================================================================
+    var audioInitialized = false;
+    var previewSynths = {};
+    var handAudio = {};
+
+    function triggerAuditionNote(loop) {
+      if (!audioInitialized || !previewSynths.sqPoly) return;
+      const g = genreData[state.genreIdx];
+      const n = tNote(g.scale[(loop.colorIdx * 2) % g.scale.length], loop.y);
+      try {
+        previewSynths.sqPoly.triggerAttackRelease(n, '16n');
+      } catch (e) {}
+    }
+
+    async function initAudio() {
+      if (audioInitialized) return;
+      await Tone.start();
+      Tone.Transport.bpm.value = state.currentBpm;
+
+      const masterLimiter = new Tone.Limiter(-1.5).toDestination();
+      const masterComp = new Tone.Compressor({ threshold: -16, ratio: 3.5, attack: 0.005, release: 0.15 }).connect(masterLimiter);
+      const reverb = new Tone.Reverb({ decay: 2.4, wet: 0.28 }).connect(masterComp);
+      const delay = new Tone.FeedbackDelay('8n.', 0.24).connect(reverb);
+
+      // -----------------------------------------------------------------------
+      // A) COLOR & SHAPE VERSION SYNTH BANKS (70 INSTRUMENTS)
+      // -----------------------------------------------------------------------
+      const sqKick = new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 5.5 }).connect(masterComp);
+      sqKick.volume.value = -3;
+      const sqBass = new Tone.PolySynth(Tone.MonoSynth, {
+        maxPolyphony: 8,
+        oscillator: { type: 'sawtooth' },
+        filter: { Q: 3.5, type: 'lowpass', rolloff: -24 },
+        envelope: { attack: 0.008, decay: 0.18, sustain: 0.25, release: 0.2 }
+      }).connect(masterComp);
+      sqBass.volume.value = -4;
+      const sqPoly = new Tone.PolySynth(Tone.Synth, {
+        maxPolyphony: 18,
+        oscillator: { type: 'triangle' },
+        envelope: { attack: 0.02, decay: 0.35, sustain: 0.4, release: 0.5 }
+      }).connect(reverb);
+      sqPoly.volume.value = -5;
+      previewSynths.sqPoly = sqPoly;
+
+      const ringHaloSynth = new Tone.PolySynth(Tone.Synth, {
+        maxPolyphony: 18,
+        oscillator: { type: 'fatsawtooth', count: 2, spread: 20 },
+        envelope: { attack: 0.18, decay: 0.5, sustain: 0.65, release: 1.1 }
+      }).connect(reverb);
+      ringHaloSynth.volume.value = -5;
+
+      const triSnare = new Tone.NoiseSynth({
+        noise: { type: 'white' },
+        envelope: { attack: 0.001, decay: 0.15, sustain: 0 }
+      }).connect(reverb);
+      triSnare.volume.value = -4;
+      const triTom = new Tone.MembraneSynth({ pitchDecay: 0.03, octaves: 3.2 }).connect(masterComp);
+      triTom.volume.value = -4;
+
+      const crossMallet = new Tone.PolySynth(Tone.FMSynth, {
+        maxPolyphony: 16,
+        harmonicity: 3.5,
+        modulationIndex: 8,
+        envelope: { attack: 0.002, decay: 0.20, sustain: 0.05, release: 0.20 }
+      }).connect(delay);
+      crossMallet.volume.value = -4;
+
+      const lineHat = new Tone.MetalSynth({
+        frequency: 520,
+        envelope: { attack: 0.001, decay: 0.055, release: 0.02 },
+        harmonicity: 5.1, modulationIndex: 28, resonance: 4200, octaves: 1.2
+      }).connect(masterComp);
+      lineHat.volume.value = -9;
+      const lineLaser = new Tone.PolySynth(Tone.Synth, {
+        maxPolyphony: 12,
+        oscillator: { type: 'square' },
+        envelope: { attack: 0.004, decay: 0.14, sustain: 0.12, release: 0.12 }
+      }).connect(delay);
+      lineLaser.volume.value = -5;
+
+      const starBell = new Tone.PolySynth(Tone.Synth, {
+        maxPolyphony: 16,
+        oscillator: { type: 'fatsawtooth', count: 2, spread: 16 },
+        envelope: { attack: 0.006, decay: 0.26, sustain: 0.12, release: 0.45 }
+      }).connect(delay);
+      starBell.volume.value = -5;
+
+      const lshapeStab = new Tone.PolySynth(Tone.AMSynth, {
+        maxPolyphony: 16,
+        harmonicity: 2.5,
+        envelope: { attack: 0.004, decay: 0.16, sustain: 0.12, release: 0.15 }
+      }).connect(delay);
+      lshapeStab.volume.value = -3;
+
+      new Tone.Sequence((time, step) => {
+        if (state.appVersion !== 'color_shape') return;
+        const g = genreData[state.genreIdx];
+        const scale = g.scale;
+        const bassScale = g.bassScale;
+
+        // 1) ■ SQUARE
+        COLOR_KEYS.forEach((color, cIdx) => {
+          const slot = state.loops[`square_${color}`];
+          if (!slot.active) return;
+          const pat = COLOR_RHYTHM_PATTERNS[cIdx];
+          if (!pat[(step + cIdx) % 8]) return;
+
+          if (cIdx === 0) {
+            const bNote = tNote(bassScale[(step / 2 | 0) % bassScale.length], slot.y);
+            sqKick.triggerAttackRelease(bNote, '8n', time);
+            Tone.Draw.schedule(() => { state.beatPulse = 1.0; }, time);
+          } else if (cIdx <= 3) {
+            const bNote = tNote(bassScale[(cIdx * 2 + step) % bassScale.length], slot.y);
+            sqBass.triggerAttackRelease(bNote, '16n', time);
+          } else {
+            if (step % 2 === (cIdx % 2)) {
+              const rootIdx = (cIdx + Math.floor(step / 2) * 2) % (scale.length - 5);
+              const chord = [
+                tNote(scale[rootIdx], slot.y),
+                tNote(scale[rootIdx + 2], slot.y),
+                tNote(scale[rootIdx + 4], slot.y)
+              ];
+              sqPoly.triggerAttackRelease(chord, '8n', time);
+            }
+          }
+        });
+
+        // 2) 🍩 RING / DONUT
+        COLOR_KEYS.forEach((color, cIdx) => {
+          const slot = state.loops[`ring_${color}`];
+          if (!slot.active) return;
+          if (step % 4 === (cIdx % 4)) {
+            const baseIdx = (cIdx + Math.floor(step / 4)) % (scale.length - 6);
+            const intervalChord = [
+              tNote(bassScale[cIdx % bassScale.length], slot.y),
+              tNote(scale[baseIdx], slot.y),
+              tNote(scale[baseIdx + 4], slot.y)
+            ];
+            ringHaloSynth.triggerAttackRelease(intervalChord, '4n', time);
+            Tone.Draw.schedule(() => { state.beatPulse = Math.max(state.beatPulse, 0.55); }, time);
+          }
+        });
+
+        // 3) ▲ TRIANGLE
+        COLOR_KEYS.forEach((color, cIdx) => {
+          const slot = state.loops[`triangle_${color}`];
+          if (!slot.active) return;
+          const pat = COLOR_RHYTHM_PATTERNS[cIdx];
+          if (pat[(step + cIdx) % 8]) {
+            if ((step + cIdx) % 2 === 0) {
+              triSnare.triggerAttackRelease('16n', time);
+            }
+            const drumPitch = tNote(bassScale[(cIdx + step) % bassScale.length], slot.y, 7);
+            triTom.triggerAttackRelease(drumPitch, '16n', time);
+            Tone.Draw.schedule(() => { state.beatPulse = Math.max(state.beatPulse, 0.82); }, time);
+          }
+        });
+
+        // 4) ✚ CROSS
+        COLOR_KEYS.forEach((color, cIdx) => {
+          const slot = state.loops[`cross_${color}`];
+          if (!slot.active) return;
+          const pat = COLOR_RHYTHM_PATTERNS[(cIdx + 3) % 10];
+          if (pat[(step + cIdx) % 8]) {
+            const noteIdx = (cIdx * 2 + step) % scale.length;
+            const mNote = tNote(scale[noteIdx], slot.y);
+            crossMallet.triggerAttackRelease(mNote, '16n', time);
+          }
+        });
+
+        // 5) ━ LINE
+        COLOR_KEYS.forEach((color, cIdx) => {
+          const slot = state.loops[`line_${color}`];
+          if (!slot.active) return;
+          const pat = COLOR_RHYTHM_PATTERNS[(cIdx + 5) % 10];
+          if (pat[(step + cIdx) % 8]) {
+            lineHat.triggerAttackRelease('32n', time, 0.55 + (cIdx % 4) * 0.12);
+            const lNote = tNote(scale[(cIdx + step * 2) % scale.length], slot.y, 12);
+            lineLaser.triggerAttackRelease(lNote, '16n', time);
+          }
+        });
+
+        // 6) ★ STAR
+        COLOR_KEYS.forEach((color, cIdx) => {
+          const slot = state.loops[`star_${color}`];
+          if (!slot.active) return;
+          const pat = COLOR_RHYTHM_PATTERNS[(cIdx + 2) % 10];
+          if (pat[(step + cIdx) % 8]) {
+            const arpIdx = (cIdx + step * 2) % scale.length;
+            const sNote = tNote(scale[arpIdx], slot.y, 12);
+            starBell.triggerAttackRelease(sNote, '16n', time);
+          }
+        });
+
+        // 7) ┗ L-SHAPE
+        COLOR_KEYS.forEach((color, cIdx) => {
+          const slot = state.loops[`lshape_${color}`];
+          if (!slot.active) return;
+          const pat = COLOR_RHYTHM_PATTERNS[(cIdx + 7) % 10];
+          if (pat[(step + cIdx) % 8]) {
+            const stabIdx = (cIdx * 3 + step) % (scale.length - 2);
+            const dyad = [
+              tNote(scale[stabIdx], slot.y),
+              tNote(scale[stabIdx + 2], slot.y)
+            ];
+            lshapeStab.triggerAttackRelease(dyad, '16n', time);
+          }
+        });
+      }, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], '16n').start(0);
+
+      // -----------------------------------------------------------------------
+      // B) HAND VERSION SYNTH BANKS (12 GESTURES + RED/YELLOW/BLUE TRIGGERS)
+      // -----------------------------------------------------------------------
+      handAudio.redSynth = new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 6 }).connect(masterComp);
+      new Tone.Loop((time) => {
+        if (state.appVersion === 'hand' && state.colorEnabled && state.handColorActive.red) {
+          handAudio.redSynth.triggerAttackRelease(genreData[state.genreIdx].colorKick, '8n', time);
+          Tone.Draw.schedule(() => { state.beatPulse = 1.0; }, time);
+        }
+      }, '4n').start(0);
+
+      handAudio.yellowSynth = new Tone.MetalSynth({
+        frequency: 350, envelope: { attack: 0.001, decay: 0.06, release: 0.02 },
+        harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.2
+      }).connect(masterComp);
+      handAudio.yellowSynth.volume.value = -12;
+      new Tone.Sequence((time, vel) => {
+        if (state.appVersion === 'hand' && state.colorEnabled && state.handColorActive.yellow) {
+          handAudio.yellowSynth.triggerAttackRelease('16n', time, vel);
+        }
+      }, [0.9, 0.4, 0.7, 0.4], '16n').start(0);
+
+      handAudio.blueDrone = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: 'fatsawtooth', count: 3, spread: 20 },
+        envelope: { attack: 0.4, decay: 0.5, sustain: 0.8, release: 1.5 }
+      }).connect(reverb);
+      handAudio.blueDrone.volume.value = -100;
+      handAudio.blueDrone.triggerAttack(['C3', 'G3', 'D4']);
+
+      const bassSynth = new Tone.MonoSynth({
+        oscillator: { type: 'sawtooth' }, filter: { Q: 3, type: 'lowpass', rolloff: -24 },
+        envelope: { attack: 0.01, decay: 0.2, sustain: 0.3, release: 0.2 },
+        filterEnvelope: { attack: 0.01, decay: 0.15, sustain: 0.2, baseFrequency: 120, octaves: 3 }
+      }).connect(masterComp);
+      bassSynth.volume.value = -4;
+      new Tone.Sequence((time, idx) => {
+        if (state.appVersion === 'hand' && state.handLoops['1'].active) {
+          const note = genreData[state.genreIdx].bass[idx];
+          if (note) bassSynth.triggerAttackRelease(tNote(note, state.handLoops['1'].y), '8n', time);
+          Tone.Draw.schedule(() => { state.beatPulse = Math.max(state.beatPulse, 0.6); }, time);
+        }
+      }, [0, 1, 2, 3, 4, 5, 6, 7], '8n').start(0);
+
+      const chordSynth = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: 'triangle' }, envelope: { attack: 0.03, decay: 0.4, sustain: 0.5, release: 0.8 }
+      }).connect(reverb);
+      chordSynth.volume.value = -8;
+      new Tone.Sequence((time, idx) => {
+        if (state.appVersion === 'hand' && state.handLoops['2'].active) {
+          const chord = genreData[state.genreIdx].chords[idx];
+          chordSynth.triggerAttackRelease(tChord(chord, state.handLoops['2'].y), '2n', time);
+        }
+      }, [0, 1, 2, 3], '2n').start(0);
+
+      const arpSynth = new Tone.Synth({
+        oscillator: { type: 'square' }, envelope: { attack: 0.005, decay: 0.15, sustain: 0.05, release: 0.2 }
+      }).connect(delay);
+      arpSynth.volume.value = -10;
+      new Tone.Sequence((time, idx) => {
+        if (state.appVersion === 'hand' && state.handLoops['3'].active) {
+          const note = genreData[state.genreIdx].arp[idx];
+          if (note) arpSynth.triggerAttackRelease(tNote(note, state.handLoops['3'].y), '16n', time);
+        }
+      }, [0, 1, 2, 3, 4, 5, 6, 7], '16n').start(0);
+
+      const snare = new Tone.NoiseSynth({
+        noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.18, sustain: 0 }
+      }).connect(reverb);
+      snare.volume.value = -6;
+      new Tone.Sequence((time, idx) => {
+        if (state.appVersion === 'hand' && state.handLoops['4'].active) {
+          const hit = genreData[state.genreIdx].snare[idx];
+          if (hit) {
+            snare.triggerAttackRelease('16n', time);
+            Tone.Draw.schedule(() => { state.beatPulse = 0.85; }, time);
+          }
+        }
+      }, [0, 1, 2, 3], '4n').start(0);
+
+      const bellSynth = new Tone.FMSynth({
+        harmonicity: 3, modulationIndex: 10, envelope: { attack: 0.005, decay: 0.35, sustain: 0.1, release: 0.6 }
+      }).connect(delay);
+      bellSynth.volume.value = -9;
+      new Tone.Sequence((time, idx) => {
+        if (state.appVersion === 'hand' && state.handLoops['thumb'].active) {
+          const note = genreData[state.genreIdx].thumb[idx];
+          if (note) bellSynth.triggerAttackRelease(tNote(note, state.handLoops['thumb'].y), '8n', time);
+        }
+      }, [0, 1, 2, 3, 4, 5, 6, 7], '8n').start(0);
+
+      const acidSynth = new Tone.MonoSynth({
+        oscillator: { type: 'sawtooth' }, filter: { Q: 8, type: 'lowpass', rolloff: -24 },
+        envelope: { attack: 0.005, decay: 0.15, sustain: 0.1, release: 0.1 },
+        filterEnvelope: { attack: 0.005, decay: 0.12, sustain: 0.1, baseFrequency: 300, octaves: 3.5 }
+      }).connect(delay);
+      acidSynth.volume.value = -8;
+      new Tone.Sequence((time, idx) => {
+        if (state.appVersion === 'hand' && state.handLoops['rock'].active) {
+          const note = genreData[state.genreIdx].rock[idx];
+          if (note) acidSynth.triggerAttackRelease(tNote(note, state.handLoops['rock'].y), '16n', time);
+        }
+      }, [0, 1, 2, 3, 4, 5, 6, 7], '16n').start(0);
+
+      const marimba = new Tone.Synth({
+        oscillator: { type: 'sine' }, envelope: { attack: 0.002, decay: 0.22, sustain: 0, release: 0.2 }
+      }).connect(reverb);
+      marimba.volume.value = -5;
+      new Tone.Sequence((time, idx) => {
+        if (state.appVersion === 'hand' && state.handLoops['ok'].active) {
+          const note = genreData[state.genreIdx].ok[idx];
+          if (note) marimba.triggerAttackRelease(tNote(note, state.handLoops['ok'].y), '16n', time);
+        }
+      }, [0, 1, 2, 3, 4, 5, 6, 7], '8n').start(0);
+
+      const glitchHat = new Tone.MetalSynth({
+        frequency: 600, envelope: { attack: 0.001, decay: 0.04, release: 0.01 },
+        harmonicity: 5.1, modulationIndex: 40, resonance: 5000, octaves: 1.5
+      }).connect(masterComp);
+      glitchHat.volume.value = -14;
+      new Tone.Sequence((time, idx) => {
+        if (state.appVersion === 'hand' && state.handLoops['call'].active) {
+          const hit = genreData[state.genreIdx].call[idx];
+          if (hit) glitchHat.triggerAttackRelease('32n', time);
+        }
+      }, [0, 1, 2, 3, 4, 5, 6, 7], '16n').start(0);
+
+      const tom = new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 3 }).connect(masterComp);
+      tom.volume.value = -5;
+      new Tone.Sequence((time, idx) => {
+        if (state.appVersion === 'hand' && state.handLoops['pinch'].active) {
+          const note = genreData[state.genreIdx].pinch[idx];
+          if (note) tom.triggerAttackRelease(tNote(note, state.handLoops['pinch'].y), '16n', time);
+        }
+      }, [0, 1, 2, 3, 4, 5, 6, 7], '16n').start(0);
+
+      const trapHat = new Tone.NoiseSynth({ envelope: { attack: 0.001, decay: 0.05 } }).connect(masterComp);
+      trapHat.volume.value = -14;
+      new Tone.Sequence((time, idx) => {
+        if (state.appVersion === 'hand' && state.handLoops['gun'].active) {
+          const vel = genreData[state.genreIdx].gun[idx];
+          if (vel > 0) trapHat.triggerAttackRelease('32n', time, vel);
+        }
+      }, [0, 1, 2, 3, 4, 5, 6, 7], '16n').start(0);
+
+      const sweepPad = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: 'sine' }, envelope: { attack: 2, decay: 1, sustain: 0.8, release: 2 }
+      }).connect(reverb);
+      sweepPad.volume.value = -12;
+      new Tone.Loop((time) => {
+        if (state.appVersion === 'hand' && state.handLoops['spiderman'].active) {
+          const chord = genreData[state.genreIdx].spidermanChord;
+          sweepPad.triggerAttackRelease(tChord(chord, state.handLoops['spiderman'].y), '1m', time);
+        }
+      }, '2m').start(0);
+
+      const crystal = new Tone.MetalSynth({
+        frequency: 1200, envelope: { attack: 0.01, decay: 2, release: 1 },
+        harmonicity: 4, modulationIndex: 20, resonance: 4000
+      }).connect(delay);
+      crystal.volume.value = -18;
+      new Tone.Sequence((time, idx) => {
+        if (state.appVersion === 'hand' && state.handLoops['pinky'].active) {
+          const note = genreData[state.genreIdx].pinky[idx];
+          if (note) crystal.triggerAttackRelease(tNote(note, state.handLoops['pinky'].y), '8n', time, 0.5);
+        }
+      }, [0, 1, 2, 3, 4, 5, 6, 7], '8n').start(0);
+
+      Tone.Transport.start();
+      audioInitialized = true;
+    }
+
+    // =========================================================================
+    // 3. MEDIAPIPE HANDS ENGINE (SUPPORTS BOTH VERSIONS + ✌️✌️ VERSION SWITCH)
+    // =========================================================================
+    var latestHands = [];
+    var handsDetector = null;
+    var isSendingHand = false;
+
+    function dist(a, b) {
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    }
+
+    function areFourFingersCurled(lm) {
+      const wrist = lm[0];
+      const isIndexOpen = dist(wrist, lm[8]) > dist(wrist, lm[6]) * 1.14;
+      const isMiddleOpen = dist(wrist, lm[12]) > dist(wrist, lm[10]) * 1.14;
+      const isRingOpen = dist(wrist, lm[16]) > dist(wrist, lm[14]) * 1.14;
+      const isPinkyOpen = dist(wrist, lm[20]) > dist(wrist, lm[18]) * 1.14;
+      return !isIndexOpen && !isMiddleOpen && !isRingOpen && !isPinkyOpen;
+    }
+
+    // Classifier for Color & Shape Version (Macro gestures only: gun, index, fist)
+    function classifyMacroHandGesture(lm) {
+      const wrist = lm[0];
+      const palmScale = dist(wrist, lm[9]) || 0.1;
+
+      const isIndexOpen = dist(wrist, lm[8]) > dist(wrist, lm[6]) * 1.15;
+      const isMiddleOpen = dist(wrist, lm[12]) > dist(wrist, lm[10]) * 1.15;
+      const isRingOpen = dist(wrist, lm[16]) > dist(wrist, lm[14]) * 1.15;
+      const isPinkyOpen = dist(wrist, lm[20]) > dist(wrist, lm[18]) * 1.15;
+      const isThumbOpen = dist(lm[4], lm[17]) > dist(lm[3], lm[17]) * 1.24 && dist(lm[4], lm[9]) > palmScale * 0.74;
+
+      if (isThumbOpen && isIndexOpen && !isMiddleOpen && !isRingOpen && !isPinkyOpen) {
+        return 'gun';
+      }
+      if (!isThumbOpen && isIndexOpen && !isMiddleOpen && !isRingOpen && !isPinkyOpen) {
+        return 'index';
+      }
+      const nonThumbCount = (isIndexOpen ? 1 : 0) + (isMiddleOpen ? 1 : 0) + (isRingOpen ? 1 : 0) + (isPinkyOpen ? 1 : 0);
+      if (nonThumbCount === 0 || areFourFingersCurled(lm)) {
+        return 'fist';
+      }
+      return null;
+    }
+
+    // Classifier for Hand Version (Full 12 gestures + fist + 5)
+    function classifyFullHandGesture(lm) {
+      const wrist = lm[0];
+      const palmScale = dist(wrist, lm[9]) || 0.1;
+
+      const isIndexOpen = dist(wrist, lm[8]) > dist(wrist, lm[6]) * 1.10;
+      const isMiddleOpen = dist(wrist, lm[12]) > dist(wrist, lm[10]) * 1.10;
+      const isRingOpen = dist(wrist, lm[16]) > dist(wrist, lm[14]) * 1.10;
+      const isPinkyOpen = dist(wrist, lm[20]) > dist(wrist, lm[18]) * 1.10;
+
+      const isThumbAbducted =
+        dist(lm[4], lm[17]) > dist(lm[2], lm[17]) * 1.15 &&
+        dist(lm[4], lm[5]) > palmScale * 0.52;
+
+      const isThumbPointingUp =
+        (lm[2].y - lm[4].y > palmScale * 0.42) &&
+        (lm[5].y - lm[4].y > palmScale * 0.30) &&
+        dist(lm[4], lm[6]) > palmScale * 0.58 &&
+        dist(lm[4], lm[10]) > palmScale * 0.65;
+
+      const nonThumbCount =
+        (isIndexOpen ? 1 : 0) +
+        (isMiddleOpen ? 1 : 0) +
+        (isRingOpen ? 1 : 0) +
+        (isPinkyOpen ? 1 : 0);
+
+      if (nonThumbCount === 0 && isThumbPointingUp) return 'thumb';
+      if (dist(lm[4], lm[8]) < palmScale * 0.40 && isMiddleOpen && isRingOpen) return 'ok';
+      if (dist(lm[4], lm[8]) < palmScale * 0.36 && !isMiddleOpen && !isRingOpen && !isPinkyOpen && dist(wrist, lm[8]) > dist(wrist, lm[5]) * 0.92) return 'pinch';
+
+      if (!isThumbAbducted && isIndexOpen && !isMiddleOpen && !isRingOpen && isPinkyOpen) return 'rock';
+      if (isThumbAbducted && isIndexOpen && !isMiddleOpen && !isRingOpen && isPinkyOpen) return 'spiderman';
+      if (isThumbAbducted && !isIndexOpen && !isMiddleOpen && !isRingOpen && isPinkyOpen) return 'call';
+      if (isThumbAbducted && isIndexOpen && !isMiddleOpen && !isRingOpen && !isPinkyOpen) return 'gun';
+      if (!isThumbAbducted && !isIndexOpen && !isMiddleOpen && !isRingOpen && isPinkyOpen) return 'pinky';
+
+      if (nonThumbCount === 0 && !isThumbPointingUp) return 'fist';
+      if (nonThumbCount === 1 && isIndexOpen && !isThumbAbducted) return '1';
+      if (nonThumbCount === 2 && isIndexOpen && isMiddleOpen) return '2';
+      if (nonThumbCount === 3 && isIndexOpen && isMiddleOpen && isRingOpen && !isThumbAbducted) return '3';
+
+      if (nonThumbCount === 4) {
+        const thumbSpread = dist(lm[4], lm[5]) > palmScale * 0.52;
+        if (isThumbAbducted || thumbSpread) return '5';
+        return '4';
+      }
+      return null;
+    }
+
+    function onHandResults(results) {
+      latestHands = [];
+      if (!state.gestureEnabled) {
+        state.bpmControlActive = false;
+        state.stretching = null;
+        return;
+      }
+
+      // -----------------------------------------------------------------------
+      // BRANCH 1: COLOR & SHAPE VERSION HAND MACROS
+      // -----------------------------------------------------------------------
+      if (state.appVersion === 'color_shape') {
+        if (state.genreCooldownFrames > 0) state.genreCooldownFrames--;
+
+        let fistCount = 0;
+        let gunCount = 0;
+        let indexHands = [];
+
+        if (results.multiHandLandmarks) {
+          results.multiHandLandmarks.forEach((lm) => {
+            const g = classifyMacroHandGesture(lm);
+            const hx = 1 - lm[9].x;
+            const hy = lm[9].y;
+            if (g === 'fist' || areFourFingersCurled(lm)) fistCount++;
+            if (g === 'gun') gunCount++;
+            if (g === 'index') indexHands.push({ x: hx, y: hy });
+
+            latestHands.push({ lm, x: hx, y: hy, gesture: g, progress: 0, label: '' });
+          });
+        }
+
+        state.stretching = null;
+        state.bpmControlActive = false;
+
+        if (fistCount >= 2) {
+          state.doubleFistFrames += 1.5;
+          const prog = Math.min(1, state.doubleFistFrames / FIST_HOLD_REQUIRED);
+          latestHands.forEach(h => { h.gesture = 'fist'; h.progress = prog; h.label = 'STOP ALL'; });
+
+          if (state.doubleFistFrames >= FIST_HOLD_REQUIRED) {
+            clearAllLoops();
+            showToast('✊✊ All Loops Stopped');
+            state.doubleFistFrames = 0;
+          }
+          state.genreHoldFrames = 0;
+          state.dualIndexHoldFrames = 0;
+          return;
+        } else {
+          state.doubleFistFrames = Math.max(0, state.doubleFistFrames - 1);
+        }
+
+        if (gunCount >= 2 && state.genreCooldownFrames === 0) {
+          state.genreHoldFrames++;
+          const prog = Math.min(1, state.genreHoldFrames / GENRE_HOLD_REQUIRED);
+          latestHands.forEach(h => {
+            if (h.gesture === 'gun') {
+              h.progress = prog;
+              h.label = 'GENRE SWITCH';
+            }
+          });
+
+          if (state.genreHoldFrames >= GENRE_HOLD_REQUIRED) {
+            switchGenre();
+            state.genreHoldFrames = 0;
+            state.genreCooldownFrames = GENRE_COOLDOWN_FRAMES;
+          }
+          state.dualIndexHoldFrames = 0;
+          return;
+        } else {
+          state.genreHoldFrames = 0;
+        }
+
+        if (indexHands.length >= 2) {
+          state.dualIndexHoldFrames++;
+          const p1 = indexHands[0], p2 = indexHands[1];
+          if (state.dualIndexHoldFrames >= INDEX_LOCK_FRAMES) {
+            state.bpmControlActive = true;
+            state.stretching = { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y };
+            const avgY = (p1.y + p2.y) / 2;
+            updateBpmLowSensitivity(avgY);
+            latestHands.forEach(h => {
+              if (h.gesture === 'index') { h.progress = 1; h.label = `${state.currentBpm} BPM`; }
+            });
+          } else {
+            const prog = state.dualIndexHoldFrames / INDEX_LOCK_FRAMES;
+            latestHands.forEach(h => {
+              if (h.gesture === 'index') { h.progress = prog; h.label = 'BPM LOCK...'; }
+            });
+          }
+        } else {
+          state.dualIndexHoldFrames = 0;
+        }
+        return;
+      }
+
+      // -----------------------------------------------------------------------
+      // BRANCH 2: HAND VERSION GESTURES + ✌️✌️ SWITCH TO COLOR & SHAPE VERSION
+      // -----------------------------------------------------------------------
+      let fistCount = 0;
+      let fourCurledCount = 0;
+      let vSignCount = 0;
+      let labels = [];
+
+      if (results.multiHandLandmarks && results.multiHandedness) {
+        results.multiHandLandmarks.forEach((lm, i) => {
+          const g = classifyFullHandGesture(lm);
+          if (g === 'fist') fistCount++;
+          if (areFourFingersCurled(lm)) fourCurledCount++;
+          if (g === '2') vSignCount++;
+          labels.push(results.multiHandedness[i].label || (i === 0 ? 'Right' : 'Left'));
+          latestHands.push({ lm, x: 1 - lm[9].x, y: lm[9].y, gesture: g, progress: 0, label: '' });
+        });
+      }
+
+      let macroActive = false;
+      state.stretching = null;
+
+      if (latestHands.length === 2) {
+        const h1 = latestHands[0];
+        const h2 = latestHands[1];
+
+        // 0) SPECIAL GESTURE: ✌️✌️ Both Hands V-Sign (Peace) -> Switches to Color & Shape Version!
+        if (vSignCount >= 2) {
+          macroActive = true;
+          state.versionSwitchGestureFrames++;
+          const prog = Math.min(1, state.versionSwitchGestureFrames / VERSION_SWITCH_HOLD_FRAMES);
+          latestHands.forEach(h => {
+            h.progress = prog;
+            h.label = '🎨 TO COLOR VER.';
+          });
+          if (state.versionSwitchGestureFrames >= VERSION_SWITCH_HOLD_FRAMES) {
+            state.versionSwitchGestureFrames = 0;
+            setAppVersion('color_shape');
+            return;
+          }
+        } else {
+          state.versionSwitchGestureFrames = 0;
+        }
+
+        // 1) Tempo Stretch with Vertical Y movement (Dual Pinch)
+        if (!macroActive && h1.gesture === 'pinch' && h2.gesture === 'pinch' && fourCurledCount < 2) {
+          macroActive = true;
+          state.stretching = { x1: h1.x, y1: h1.y, x2: h2.x, y2: h2.y };
+          const avgY = (h1.y + h2.y) / 2;
+          const targetBpm = Math.max(60, Math.min(200, 60 + (1.0 - avgY) * 140));
+          if (audioInitialized) Tone.Transport.bpm.rampTo(targetBpm, 0.1);
+          state.currentBpm = Math.round(targetBpm);
+          bpmDisplay.textContent = state.currentBpm;
+        }
+
+        // 2) Stop All (Double Fists)
+        if (fistCount >= 2 || fourCurledCount >= 2) {
+          macroActive = true;
+          state.doubleFistFrames += 1.5;
+          const fistProg = Math.min(1, state.doubleFistFrames / HOLD_FRAMES_REQUIRED);
+          latestHands.forEach(h => {
+            h.gesture = 'fist';
+            h.progress = fistProg;
+            h.label = 'STOP ALL';
+          });
+          if (state.doubleFistFrames >= HOLD_FRAMES_REQUIRED) {
+            clearAllHandLoops();
+            showToast('✊✊ All Loops Stopped');
+            state.doubleFistFrames = 0;
+          }
+        } else {
+          state.doubleFistFrames = Math.max(0, state.doubleFistFrames - 1);
+        }
+      } else {
+        state.doubleFistFrames = Math.max(0, state.doubleFistFrames - 1);
+        state.versionSwitchGestureFrames = 0;
+      }
+
+      // 3) Genre Switch: Single Open Palm ('5') held for ~0.9s (26 frames)
+      const GENRE_HOLD_FRAMES = 26;
+      let openPalmDetected = latestHands.some(h => h.gesture === '5');
+      if (openPalmDetected && !macroActive) {
+        state.openPalmFrames += 1.5;
+        if (state.openPalmFrames >= GENRE_HOLD_FRAMES) {
+          switchGenre();
+          state.openPalmFrames = -18;
+        }
+      } else {
+        if (state.openPalmFrames > 0) state.openPalmFrames = Math.max(0, state.openPalmFrames - 1);
+        else if (state.openPalmFrames < 0) state.openPalmFrames++;
+      }
+
+      // Single Gesture Latching for Hand Version
+      const seenLabels = new Set();
+      for (let i = 0; i < latestHands.length; i++) {
+        const h = latestHands[i];
+        let label = labels[i];
+        if (seenLabels.has(label)) label = (label === 'Right') ? 'Left' : 'Right';
+        seenLabels.add(label);
+
+        const tracker = state.handTracker[label];
+        tracker.x = h.x;
+        tracker.y = h.y;
+
+        let progress = h.progress || 0;
+
+        if (macroActive || h.gesture === 'fist' || h.gesture === '5') {
+          if (h.gesture === 'fist') progress = (fistCount >= 2 || fourCurledCount >= 2) ? Math.min(1, state.doubleFistFrames / HOLD_FRAMES_REQUIRED) : 0;
+          else if (h.gesture === '5') progress = Math.max(0, Math.min(1, state.openPalmFrames / GENRE_HOLD_FRAMES));
+          tracker.gesture = h.gesture;
+          tracker.frames = 0;
+        } else {
+          if (tracker.cooldown > 0) {
+            tracker.cooldown--;
+            tracker.frames = 0;
+          } else if (h.gesture && h.gesture === tracker.gesture) {
+            tracker.frames++;
+            if (tracker.frames >= HOLD_FRAMES_REQUIRED) {
+              if (state.handLoops[h.gesture]) {
+                state.handLoops[h.gesture].active = !state.handLoops[h.gesture].active;
+                if (state.handLoops[h.gesture].active) {
+                  state.handLoops[h.gesture].x = h.x;
+                  state.handLoops[h.gesture].y = Math.min(0.78, Math.max(0.15, h.y));
+                }
+                updateHandBadgeUI();
+              }
+              tracker.frames = 0;
+              tracker.cooldown = COOLDOWN_FRAMES;
+            }
+          } else {
+            tracker.gesture = h.gesture;
+            tracker.frames = h.gesture ? 1 : 0;
+          }
+          progress = tracker.cooldown > 0 ? 0 : Math.min(1, tracker.frames / HOLD_FRAMES_REQUIRED);
+        }
+
+        h.progress = progress;
+        h.cooling = tracker.cooldown > 0;
+      }
+    }
+
+    async function initHands() {
+      if (handsDetector) return;
+      handsDetector = new Hands({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`
+      });
+      handsDetector.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.68,
+        minTrackingConfidence: 0.68
+      });
+      handsDetector.onResults(onHandResults);
+      await handsDetector.initialize();
+    }
+
+    // =========================================================================
+    // 4. CV PRE-PROCESSOR (WITH COLOR SENSITIVITY & SKIN-TONE REJECTION)
+    //    & 7-SHAPE / 10-COLOR CLASSIFIER
+    // =========================================================================
+    function enhanceCVFrame(imgData, W, H) {
+      const bright = state.cvBrightness;
+      const contrast = state.cvContrast;
+      const sat = state.cvSaturation;
+      const edgeStr = state.cvEdgeStrength;
+
+      // Minimum raw chroma delta before Saturation Boost kicks in:
+      // Lower Color Sens = higher gate so dull skin/walls don't get boosted into false colors
+      const satBoostGate = 38 - (state.cvColorSens / 100) * 28; // Range: ~10 (at 100% sens) to ~35 (at 10% sens)
+
+      for (let i = 0; i < imgData.length; i += 4) {
+        let r = imgData[i] + bright;
+        let g = imgData[i + 1] + bright;
+        let b = imgData[i + 2] + bright;
+
+        r = (r - 128) * contrast + 128;
+        g = (g - 128) * contrast + 128;
+        b = (b - 128) * contrast + 128;
+
+        const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+        const maxC = Math.max(r, g, b), minC = Math.min(r, g, b);
+        const rawDelta = maxC - minC;
+        const effSat = rawDelta > satBoostGate ? sat : 1.0;
+        r = luma + (r - luma) * effSat;
+        g = luma + (g - luma) * effSat;
+        b = luma + (b - luma) * effSat;
+
+        imgData[i]     = r < 0 ? 0 : (r > 255 ? 255 : r);
+        imgData[i + 1] = g < 0 ? 0 : (g > 255 ? 255 : g);
+        imgData[i + 2] = b < 0 ? 0 : (b > 255 ? 255 : b);
+      }
+
+      if (edgeStr > 0.05) {
+        const copy = new Uint8ClampedArray(imgData);
+        const amount = edgeStr * 0.55;
+        for (let y = 1; y < H - 1; y++) {
+          for (let x = 1; x < W - 1; x++) {
+            const idx = (y * W + x) * 4;
+            const up = ((y - 1) * W + x) * 4;
+            const dn = ((y + 1) * W + x) * 4;
+            const lf = (y * W + (x - 1)) * 4;
+            const rt = (y * W + (x + 1)) * 4;
+
+            for (let c = 0; c < 3; c++) {
+              const center = copy[idx + c];
+              const lap = 4 * center - copy[up + c] - copy[dn + c] - copy[lf + c] - copy[rt + c];
+              const val = center + lap * amount;
+              imgData[idx + c] = val < 0 ? 0 : (val > 255 ? 255 : val);
+            }
+          }
+        }
+      }
+    }
+
+    function classifyPixel10Color(r, g, b) {
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const d = max - min;
+      const v = max / 255;
+
+      // Sensitivity factor: 0.0 (Strictest, Sens=10%) to 1.0 (Most Sensitive, Sens=100%)
+      const sensNorm = Math.max(0, Math.min(1, (state.cvColorSens - 10) / 90));
+
+      // Dynamic brightness floor
+      const minV = 0.34 - sensNorm * 0.10; // 0.34 at strict, 0.24 at max sens
+      if (v < minV) return null;
+
+      const s = max === 0 ? 0 : d / max;
+
+      let h = 0;
+      if (d > 0) {
+        if (max === r) h = ((g - b) / d) % 6;
+        else if (max === g) h = (b - r) / d + 2;
+        else h = (r - g) / d + 4;
+        h = Math.round(h * 60);
+        if (h < 0) h += 360;
+      }
+
+      // -----------------------------------------------------------------------
+      // HUMAN FACE / SKIN-TONE REJECTION FILTER (When 🙅 Skin Filter is ON)
+      // Human skin under indoor/projector light has R > G > B, Hue 4°..42° (or 335°..360° for lips/cheeks),
+      // and moderate saturation (typically S < 0.65). Vivid origami/colored paper has much higher S or non-skin Hue.
+      // -----------------------------------------------------------------------
+      if (state.skinFilterEnabled) {
+        const isWarmSkinHue = (h >= 4 && h <= 43) || h >= 336;
+        const isRosySkinHue = (h >= 315 && h < 336);
+        // Classic RGB skin signature: R is dominant, G is middle, B is lowest
+        if (isWarmSkinHue && r > g && g >= b * 0.85) {
+          // Require very high saturation (vivid paper) in the Red/Orange/Yellow-Warm band to pass
+          const skinSatCeiling = 0.68 - sensNorm * 0.18; // At 42% sens -> requires S > 0.61 in skin hue band!
+          const skinDeltaCeiling = 115 - sensNorm * 35;
+          if (s < skinSatCeiling || d < skinDeltaCeiling) {
+            return null;
+          }
+        }
+        if (isRosySkinHue && s < (0.58 - sensNorm * 0.16)) {
+          return null;
+        }
+      }
+
+      // White detection (only if White Detect is enabled)
+      if (v > 0.86 && s < 0.12) {
+        return state.whiteColorEnabled ? 'white' : null;
+      }
+
+      // Dynamic Chromatic Thresholds controlled by 🎯 Color Sens Slider:
+      // At Sens = 10% (Strict): minSat = 0.56, minDelta = 78 (Only vivid colored paper passes)
+      // At Sens = 42% (Default): minSat = 0.43, minDelta = 56
+      // At Sens = 100% (Max): minSat = 0.19, minDelta = 20
+      const minSat = 0.56 - sensNorm * 0.37;
+      const minDelta = 78 - sensNorm * 58;
+
+      // Pastel Yellow & Pink rescue (scaled by sensitivity, and respecting skin filter)
+      const pastelSat = Math.max(0.18, minSat * 0.72);
+      const pastelDelta = Math.max(20, minDelta * 0.72);
+      if (v > 0.58 && s >= pastelSat && d >= pastelDelta) {
+        if (h >= 42 && h <= 67) return 'yellow';
+        if (!state.skinFilterEnabled && ((h >= 294 && h <= 346) || (h >= 340 && v > 0.74 && s < 0.45))) {
+          return 'pink';
+        }
+        if (state.skinFilterEnabled && (h >= 294 && h <= 325) && s >= minSat * 0.85) {
+          return 'pink';
+        }
+      }
+
+      if (s < minSat || d < minDelta) return null;
+
+      if (h >= 347 || h <= 12) return 'red';
+      if (h >= 13 && h <= 35) return 'orange';
+      if (h >= 36 && h <= 65) return 'yellow';
+      if (h >= 66 && h <= 95) return 'lime';
+      if (h >= 96 && h <= 162) return 'green';
+      if (h >= 163 && h <= 198) return 'cyan';
+      if (h >= 199 && h <= 249) return 'blue';
+      if (h >= 250 && h <= 293) return 'purple';
+      if (h >= 294 && h <= 346) return 'pink';
+
+      return null;
+    }
+
+    function resolveEnabledShape(rawShape, metrics) {
+      if (!state.shapeEnabled) return 'square';
+      if (state.enabledShapes[rawShape]) return rawShape;
+
+      const preferOrder = ['square', 'triangle', 'ring', 'line', 'cross', 'star', 'lshape'];
+      if (metrics) {
+        if (metrics.centerFill < 0.35 && state.enabledShapes.ring) return 'ring';
+        if (metrics.hasTriangleTaper && state.enabledShapes.triangle) return 'triangle';
+        if (metrics.elongation > 2.6 && state.enabledShapes.line) return 'line';
+      }
+      for (let i = 0; i < preferOrder.length; i++) {
+        if (state.enabledShapes[preferOrder[i]]) return preferOrder[i];
+      }
+      return 'square';
+    }
+
+    function classifyBlob7Shape(pixels, minX, maxX, minY, maxY, gridW, gridH, mask) {
+      const bw = maxX - minX + 1;
+      const bh = maxY - minY + 1;
+      const minDim = Math.min(bw, bh);
+      const maxDim = Math.max(bw, bh);
+      const area = pixels.length;
+      const boxArea = Math.max(1, bw * bh);
+      const extent = area / boxArea;
+
+      let sumX = 0, sumY = 0;
+      for (let i = 0; i < area; i++) {
+        sumX += pixels[i][0];
+        sumY += pixels[i][1];
+      }
+      const cx = sumX / area;
+      const cy = sumY / area;
+
+      let mu20 = 0, mu02 = 0, mu11 = 0;
+      for (let i = 0; i < area; i++) {
+        const dx = pixels[i][0] - cx;
+        const dy = pixels[i][1] - cy;
+        mu20 += dx * dx;
+        mu02 += dy * dy;
+        mu11 += dx * dy;
+      }
+      const common = Math.sqrt((mu20 - mu02) * (mu20 - mu02) + 4 * mu11 * mu11);
+      const lambda1 = Math.max(1, (mu20 + mu02 + common) / 2);
+      const lambda2 = Math.max(0.1, (mu20 + mu02 - common) / 2);
+      const elongation = Math.sqrt(lambda1 / lambda2);
+
+      const holeR = Math.max(1.8, minDim * 0.22);
+      let centerTotal = 0, centerHits = 0;
+      const icx = Math.round(cx), icy = Math.round(cy);
+      const rInt = Math.ceil(holeR);
+      for (let dy = -rInt; dy <= rInt; dy++) {
+        for (let dx = -rInt; dx <= rInt; dx++) {
+          if (dx * dx + dy * dy <= holeR * holeR) {
+            const nx = icx + dx, ny = icy + dy;
+            if (nx >= 0 && nx < gridW && ny >= 0 && ny < gridH) {
+              centerTotal++;
+              if (mask[ny * gridW + nx]) centerHits++;
+            }
+          }
+        }
+      }
+      const centerFill = centerTotal > 0 ? centerHits / centerTotal : 1;
+
+      const rayDirs = [
+        [1, 0], [0.707, 0.707], [0, 1], [-0.707, 0.707],
+        [-1, 0], [-0.707, -0.707], [0, -1], [0.707, -0.707]
+      ];
+      let hitRays = 0;
+      const maxRayLen = Math.ceil(maxDim * 0.65);
+      const startStep = Math.max(2, Math.floor(minDim * 0.18));
+      for (let d = 0; d < 8; d++) {
+        const vx = rayDirs[d][0], vy = rayDirs[d][1];
+        let rayHit = false;
+        for (let step = startStep; step <= maxRayLen; step++) {
+          const rx = Math.round(cx + vx * step);
+          const ry = Math.round(cy + vy * step);
+          if (rx < minX || rx > maxX || ry < minY || ry > maxY) break;
+          if (mask[ry * gridW + rx]) {
+            rayHit = true;
+            break;
+          }
+        }
+        if (rayHit) hitRays++;
+      }
+
+      if (centerFill < 0.28 && hitRays >= 7) {
+        return resolveEnabledShape('ring', { centerFill, elongation, hasTriangleTaper: false });
+      }
+      if (elongation > 2.95 || bw / bh > 2.9 || bh / bw > 2.9) {
+        return resolveEnabledShape('line', { centerFill, elongation, hasTriangleTaper: false });
+      }
+      if (centerFill < 0.30 && hitRays >= 3 && hitRays <= 6 && extent < 0.56) {
+        return resolveEnabledShape('lshape', { centerFill, elongation, hasTriangleTaper: false });
+      }
+
+      const hSliceWidths = [0, 0, 0, 0, 0];
+      const vSliceHeights = [0, 0, 0, 0, 0];
+
+      for (let s = 0; s < 5; s++) {
+        const sy0 = Math.floor(minY + (s * bh) / 5);
+        const sy1 = Math.max(sy0, Math.floor(minY + ((s + 1) * bh) / 5) - 1);
+        let rowSpanSum = 0, rowCount = 0;
+        for (let y = sy0; y <= sy1; y++) {
+          let leftX = -1, rightX = -1;
+          for (let x = minX; x <= maxX; x++) {
+            if (mask[y * gridW + x]) {
+              if (leftX === -1) leftX = x;
+              rightX = x;
+            }
+          }
+          rowCount++;
+          if (leftX !== -1) rowSpanSum += (rightX - leftX + 1) / bw;
+        }
+        hSliceWidths[s] = rowCount > 0 ? rowSpanSum / rowCount : 0;
+
+        const sx0 = Math.floor(minX + (s * bw) / 5);
+        const sx1 = Math.max(sx0, Math.floor(minX + ((s + 1) * bw) / 5) - 1);
+        let colSpanSum = 0, colCount = 0;
+        for (let x = sx0; x <= sx1; x++) {
+          let topY = -1, botY = -1;
+          for (let y = minY; y <= maxY; y++) {
+            if (mask[y * gridW + x]) {
+              if (topY === -1) topY = y;
+              botY = y;
+            }
+          }
+          colCount++;
+          if (topY !== -1) colSpanSum += (botY - topY + 1) / bh;
+        }
+        vSliceHeights[s] = colCount > 0 ? colSpanSum / colCount : 0;
+      }
+
+      const w0 = hSliceWidths[0], w2 = hSliceWidths[2], w4 = hSliceWidths[4];
+      const h0 = vSliceHeights[0], h2 = vSliceHeights[2], h4 = vSliceHeights[4];
+
+      const isUpTriangleTaper = (w0 < w2 && w2 < w4 && (w4 - w0) > 0.34 && w0 < 0.50 && w4 > 0.68);
+      const isDownTriangleTaper = (w4 < w2 && w2 < w0 && (w0 - w4) > 0.34 && w4 < 0.50 && w0 > 0.68);
+      const isLeftTriangleTaper = (h0 < h2 && h2 < h4 && (h4 - h0) > 0.34 && h0 < 0.50 && h4 > 0.68);
+      const isRightTriangleTaper = (h4 < h2 && h2 < h0 && (h0 - h4) > 0.34 && h4 < 0.50 && h0 > 0.68);
+      const hasTriangleTaper = isUpTriangleTaper || isDownTriangleTaper || isLeftTriangleTaper || isRightTriangleTaper;
+
+      let cornerTotal = 0, cornerHits = 0;
+      const cw = Math.max(1, Math.floor(bw * 0.27));
+      const ch = Math.max(1, Math.floor(bh * 0.27));
+      const corners = [
+        [minX, minY],
+        [maxX - cw + 1, minY],
+        [minX, maxY - ch + 1],
+        [maxX - cw + 1, maxY - ch + 1]
+      ];
+      for (let c = 0; c < 4; c++) {
+        const cx0 = corners[c][0], cy0 = corners[c][1];
+        for (let y = cy0; y < cy0 + ch; y++) {
+          for (let x = cx0; x < cx0 + cw; x++) {
+            if (x >= minX && x <= maxX && y >= minY && y <= maxY) {
+              cornerTotal++;
+              if (mask[y * gridW + x]) cornerHits++;
+            }
+          }
+        }
+      }
+      const cornerFill = cornerTotal > 0 ? cornerHits / cornerTotal : 0;
+
+      const binMaxR = new Float32Array(36);
+      for (let i = 0; i < area; i++) {
+        const px = pixels[i][0], py = pixels[i][1];
+        const isEdge =
+          px === 0 || px === gridW - 1 || py === 0 || py === gridH - 1 ||
+          !mask[py * gridW + (px - 1)] || !mask[py * gridW + (px + 1)] ||
+          !mask[(py - 1) * gridW + px] || !mask[(py + 1) * gridW + px];
+
+        if (isEdge) {
+          const dx = px - cx, dy = py - cy;
+          const r = Math.hypot(dx, dy);
+          let angle = Math.atan2(dy, dx);
+          if (angle < 0) angle += Math.PI * 2;
+          const bin = Math.min(35, Math.floor((angle / (Math.PI * 2)) * 36));
+          if (r > binMaxR[bin]) binMaxR[bin] = r;
+        }
+      }
+
+      for (let pass = 0; pass < 2; pass++) {
+        for (let b = 0; b < 36; b++) {
+          if (binMaxR[b] === 0) {
+            binMaxR[b] = (binMaxR[(b + 35) % 36] + binMaxR[(b + 1) % 36]) * 0.5;
+          }
+        }
+      }
+
+      let smoothR = Float32Array.from(binMaxR);
+      for (let pass = 0; pass < 3; pass++) {
+        const nextR = new Float32Array(36);
+        for (let b = 0; b < 36; b++) {
+          nextR[b] = (
+            smoothR[(b + 34) % 36] * 1 +
+            smoothR[(b + 35) % 36] * 2 +
+            smoothR[b] * 4 +
+            smoothR[(b + 1) % 36] * 2 +
+            smoothR[(b + 2) % 36] * 1
+          ) / 10;
+        }
+        smoothR = nextR;
+      }
+
+      let meanR = 0;
+      for (let b = 0; b < 36; b++) meanR += smoothR[b];
+      meanR /= 36;
+
+      const rawPeaks = [];
+      for (let b = 0; b < 36; b++) {
+        const p1 = smoothR[(b + 35) % 36];
+        const curr = smoothR[b];
+        const n1 = smoothR[(b + 1) % 36];
+        if (curr >= p1 && curr >= n1 && curr > meanR * 1.04) {
+          rawPeaks.push({ bin: b, r: curr });
+        }
+      }
+
+      const mergedPeaks = [];
+      for (let i = 0; i < rawPeaks.length; i++) {
+        const pk = rawPeaks[i];
+        if (mergedPeaks.length === 0) {
+          mergedPeaks.push(pk);
+        } else {
+          const prev = mergedPeaks[mergedPeaks.length - 1];
+          const binDist = Math.min(Math.abs(pk.bin - prev.bin), 36 - Math.abs(pk.bin - prev.bin));
+          if (binDist < 4) {
+            if (pk.r > prev.r) mergedPeaks[mergedPeaks.length - 1] = pk;
+          } else {
+            mergedPeaks.push(pk);
+          }
+        }
+      }
+      if (mergedPeaks.length >= 2) {
+        const first = mergedPeaks[0];
+        const last = mergedPeaks[mergedPeaks.length - 1];
+        const wrapDist = 36 - Math.abs(last.bin - first.bin);
+        if (wrapDist < 4) {
+          if (last.r > first.r) mergedPeaks[0] = last;
+          mergedPeaks.pop();
+        }
+      }
+
+      let deepValleyCount = 0;
+      if (mergedPeaks.length >= 4) {
+        for (let i = 0; i < mergedPeaks.length; i++) {
+          const pA = mergedPeaks[i];
+          const pB = mergedPeaks[(i + 1) % mergedPeaks.length];
+          let minValley = Infinity;
+          let b = pA.bin;
+          while (b !== pB.bin) {
+            if (smoothR[b] < minValley) minValley = smoothR[b];
+            b = (b + 1) % 36;
+          }
+          const avgPeak = (pA.r + pB.r) * 0.5;
+          if (minValley < avgPeak * 0.66) {
+            deepValleyCount++;
+          }
+        }
+      }
+
+      if ((hasTriangleTaper && centerFill > 0.45 && extent >= 0.28 && extent <= 0.68) ||
+          (mergedPeaks.length === 3 && extent >= 0.30 && extent <= 0.65 && centerFill > 0.45)) {
+        return resolveEnabledShape('triangle', { centerFill, elongation, hasTriangleTaper });
+      }
+      if (centerFill > 0.58 && cornerFill < 0.25 && w2 > 0.60 && h2 > 0.60 && extent < 0.62 && mergedPeaks.length <= 4) {
+        return resolveEnabledShape('cross', { centerFill, elongation, hasTriangleTaper });
+      }
+      if (!hasTriangleTaper && mergedPeaks.length >= 5 && deepValleyCount >= 4 && extent < 0.62) {
+        return resolveEnabledShape('star', { centerFill, elongation, hasTriangleTaper });
+      }
+      return resolveEnabledShape('square', { centerFill, elongation, hasTriangleTaper });
+    }
+
+    var latestBlobs = [];
+
+    function updateColorPillsUI() {
+      Object.keys(state.colorActive).forEach((c) => {
+        const pill = document.getElementById(`pill-${c}`);
+        if (!pill) return;
+        if (c === 'white' && !state.whiteColorEnabled) {
+          pill.classList.remove('ring-2', 'ring-white', 'scale-105');
+          pill.style.opacity = '0.35';
+          return;
+        }
+        if (state.colorActive[c]) {
+          pill.classList.add('ring-2', 'ring-white', 'scale-105');
+          pill.style.opacity = '1';
+        } else {
+          pill.classList.remove('ring-2', 'ring-white', 'scale-105');
+          pill.style.opacity = '0.55';
+        }
+      });
+    }
+
+    // =========================================================================
+    // 5. VISION PROCESSORS FOR BOTH VERSIONS
+    // =========================================================================
+    function detectHandVersionColors() {
+      if (!state.colorEnabled || !state.cameraActive || video.readyState < 2) {
+        state.handColorActive = { red: false, yellow: false, blue: false };
+        if (handAudio.blueDrone) handAudio.blueDrone.volume.rampTo(-100, 0.2);
+        return;
+      }
+      handColorCtx.save();
+      handColorCtx.scale(-1, 1);
+      handColorCtx.drawImage(video, -handColorCanvas.width, 0, handColorCanvas.width, handColorCanvas.height);
+      handColorCtx.restore();
+
+      const imgData = handColorCtx.getImageData(0, 0, handColorCanvas.width, handColorCanvas.height).data;
+      let rCount = 0, rX = 0, rY = 0, yCount = 0, yX = 0, yY = 0, bCount = 0, bX = 0, bY = 0;
+
+      for (let y = 0; y < handColorCanvas.height; y++) {
+        for (let x = 0; x < handColorCanvas.width; x++) {
+          const i = (y * handColorCanvas.width + x) * 4;
+          const r = imgData[i], g = imgData[i + 1], b = imgData[i + 2];
+          if (r > 165 && g < 75 && b < 75) { rCount++; rX += x; rY += y; }
+          else if (r > 170 && g > 155 && b < 80) { yCount++; yX += x; yY += y; }
+          else if (b > 155 && r < 85 && g < 120) { bCount++; bX += x; bY += y; }
+        }
+      }
+
+      const threshold = 22;
+      state.handColorActive.red = rCount > threshold;
+      if (state.handColorActive.red) {
+        state.handColorPos.red.x = (rX / rCount) / handColorCanvas.width;
+        state.handColorPos.red.y = (rY / rCount) / handColorCanvas.height;
+      }
+
+      state.handColorActive.yellow = yCount > threshold;
+      if (state.handColorActive.yellow) {
+        state.handColorPos.yellow.x = (yX / yCount) / handColorCanvas.width;
+        state.handColorPos.yellow.y = (yY / yCount) / handColorCanvas.height;
+      }
+
+      state.handColorActive.blue = bCount > threshold;
+      if (state.handColorActive.blue) {
+        state.handColorPos.blue.x = (bX / bCount) / handColorCanvas.width;
+        state.handColorPos.blue.y = (bY / bCount) / handColorCanvas.height;
+        state.handColorPos.blue.width = Math.min(420, 100 + bCount * 1.5);
+        if (handAudio.blueDrone) handAudio.blueDrone.volume.rampTo(-14, 0.15);
+      } else {
+        if (handAudio.blueDrone) handAudio.blueDrone.volume.rampTo(-100, 0.3);
+      }
+    }
+
+    function processColorAndShapes() {
+      latestBlobs = [];
+      const W = cvCanvas.width;
+      const H = cvCanvas.height;
+
+      Object.keys(state.colorActive).forEach(k => state.colorActive[k] = false);
+
+      if (state.cameraActive && video.readyState >= 2) {
+        cvCtx.save();
+        cvCtx.scale(-1, 1);
+        cvCtx.drawImage(video, -W, 0, W, H);
+        cvCtx.restore();
+
+        const frameObj = cvCtx.getImageData(0, 0, W, H);
+        const imgData = frameObj.data;
+        enhanceCVFrame(imgData, W, H);
+
+        const colorMasks = {};
+        COLOR_KEYS.forEach(k => { colorMasks[k] = new Uint8Array(W * H); });
+
+        for (let y = 0; y < H; y++) {
+          for (let x = 0; x < W; x++) {
+            const idx = (y * W + x) * 4;
+            const c = classifyPixel10Color(imgData[idx], imgData[idx + 1], imgData[idx + 2]);
+            if (c) colorMasks[c][y * W + x] = 1;
+          }
+        }
+
+        const minArea = state.pixelThreshold;
+        const maxArea = Math.floor(W * H * 0.42);
+
+        COLOR_KEYS.forEach((colorKey) => {
+          if (colorKey === 'white' && !state.whiteColorEnabled) return;
+          const mask = colorMasks[colorKey];
+          const visited = new Uint8Array(W * H);
+          let bestBlob = null;
+
+          for (let y = 1; y < H - 1; y++) {
+            for (let x = 1; x < W - 1; x++) {
+              const startIdx = y * W + x;
+              if (mask[startIdx] && !visited[startIdx]) {
+                const pixels = [];
+                const edgePoints = [];
+                const queue = [startIdx];
+                visited[startIdx] = 1;
+                let minX = x, maxX = x, minY = y, maxY = y;
+
+                while (queue.length > 0) {
+                  const curr = queue.pop();
+                  const cx = curr % W;
+                  const cy = (curr / W) | 0;
+                  pixels.push([cx, cy]);
+
+                  if (cx < minX) minX = cx;
+                  if (cx > maxX) maxX = cx;
+                  if (cy < minY) minY = cy;
+                  if (cy > maxY) maxY = cy;
+
+                  const neighbors = [curr - 1, curr + 1, curr - W, curr + W];
+                  let isBoundary = false;
+                  for (let n = 0; n < 4; n++) {
+                    const ni = neighbors[n];
+                    if (ni >= 0 && ni < W * H) {
+                      if (mask[ni]) {
+                        if (!visited[ni]) {
+                          visited[ni] = 1;
+                          queue.push(ni);
+                        }
+                      } else {
+                        isBoundary = true;
+                      }
+                    }
+                  }
+                  if (isBoundary && edgePoints.length < 180) {
+                    edgePoints.push([cx / W, cy / H]);
+                  }
+                }
+
+                if (pixels.length >= minArea && pixels.length <= maxArea) {
+                  if (!bestBlob || pixels.length > bestBlob.pixels.length) {
+                    bestBlob = { pixels, edgePoints, minX, maxX, minY, maxY };
+                  }
+                }
+              }
+            }
+          }
+
+          if (bestBlob) {
+            const rawShape = classifyBlob7Shape(
+              bestBlob.pixels,
+              bestBlob.minX, bestBlob.maxX,
+              bestBlob.minY, bestBlob.maxY,
+              W, H, mask
+            );
+
+            if (!state.colorShapeVotes[colorKey]) state.colorShapeVotes[colorKey] = [];
+            const votes = state.colorShapeVotes[colorKey];
+            votes.push(rawShape);
+            if (votes.length > 9) votes.shift();
+            const counts = {};
+            let stableShape = rawShape, bestCount = 0;
+            for (let v = 0; v < votes.length; v++) {
+              counts[votes[v]] = (counts[votes[v]] || 0) + 1;
+              if (counts[votes[v]] > bestCount) {
+                bestCount = counts[votes[v]];
+                stableShape = votes[v];
+              }
+            }
+
+            const normX = ((bestBlob.minX + bestBlob.maxX) / 2) / W;
+            const normY = ((bestBlob.minY + bestBlob.maxY) / 2) / H;
+
+            latestBlobs.push({
+              color: colorKey,
+              shape: stableShape,
+              x: normX,
+              y: normY,
+              minX: bestBlob.minX / W,
+              maxX: bestBlob.maxX / W,
+              minY: bestBlob.minY / H,
+              maxY: bestBlob.maxY / H,
+              edgePoints: bestBlob.edgePoints,
+              area: bestBlob.pixels.length
+            });
+          }
+        });
+      }
+
+      if (state.sim.enabled && state.sim.insideCanvas) {
+        if (state.sim.indexBpmMode) {
+          state.bpmControlActive = true;
+          state.stretching = { x1: state.sim.x - 0.1, y1: state.sim.y, x2: state.sim.x + 0.1, y2: state.sim.y };
+          updateBpmLowSensitivity(state.sim.y);
+        } else {
+          latestBlobs.push({
+            color: state.sim.color,
+            shape: resolveEnabledShape(state.sim.shape, null),
+            x: state.sim.x,
+            y: state.sim.y,
+            area: 160,
+            virtual: true
+          });
+        }
+      }
+
+      latestBlobs.forEach((blob) => {
+        if (state.colorActive[blob.color] !== undefined) {
+          state.colorActive[blob.color] = true;
+          state.colorPos[blob.color].x = blob.x;
+          state.colorPos[blob.color].y = blob.y;
+        }
+      });
+      updateColorPillsUI();
+
+      if (latestBlobs.length > 0) {
+        const b0 = latestBlobs[0];
+        liveDetectBadge.textContent = `${colorMeta[b0.color].en} ${shapeMeta[b0.shape].en} (${shapeMeta[b0.shape].symbol})`;
+      } else {
+        liveDetectBadge.textContent = `CV Ready`;
+      }
+
+      const activeTrackKeysThisFrame = new Set();
+
+      if (!state.bpmControlActive) {
+        latestBlobs.forEach((blob) => {
+          if (!state.colorEnabled && !state.shapeEnabled) {
+            blob.ignoredByMode = 'Detection Mode OFF';
+            return;
+          }
+          if (state.colorEnabled && !state.shapeEnabled && blob.shape !== 'square') {
+            blob.shape = 'square';
+          }
+
+          const effectiveColor = state.colorEnabled ? blob.color : 'cyan';
+          const clampedY = Math.min(0.78, Math.max(0.15, blob.y));
+
+          const sameColorLatched = Object.values(state.loops).find((other) =>
+            other.active &&
+            other.colorKey === effectiveColor &&
+            Math.hypot(other.x - blob.x, other.y - clampedY) < 0.24
+          );
+
+          if (sameColorLatched && state.stickyLockMode) {
+            blob.shape = sameColorLatched.shape;
+            blob.resolvedKey = sameColorLatched.key;
+            blob.alreadyLatched = true;
+            blob.progress = 0;
+            sameColorLatched.x = sameColorLatched.x * 0.92 + blob.x * 0.08;
+            sameColorLatched.y = sameColorLatched.y * 0.92 + clampedY * 0.08;
+            return;
+          }
+
+          const loopKey = `${blob.shape}_${effectiveColor}`;
+          const targetLoop = state.loops[loopKey];
+          if (!targetLoop) return;
+
+          blob.resolvedKey = loopKey;
+
+          if (targetLoop.active) {
+            blob.alreadyLatched = true;
+            blob.progress = 0;
+            state.trackHold[loopKey].frames = 0;
+            return;
+          }
+
+          const overlappingLoops = state.stickyLockMode ? [] : Object.values(state.loops).filter((other) =>
+            other.active &&
+            other.key !== loopKey &&
+            Math.hypot(other.x - blob.x, other.y - clampedY) < SAME_SPOT_RADIUS
+          );
+          if (overlappingLoops.length > 0) {
+            blob.replacingName = overlappingLoops[0].label;
+          }
+
+          activeTrackKeysThisFrame.add(loopKey);
+
+          const holder = state.trackHold[loopKey];
+          if (holder.cooldown > 0) {
+            holder.cooldown--;
+            holder.frames = 0;
+            blob.progress = 0;
+          } else {
+            holder.frames++;
+            blob.progress = Math.min(1, holder.frames / HOLD_FRAMES_REQUIRED);
+
+            if (holder.frames >= HOLD_FRAMES_REQUIRED) {
+              if (!state.stickyLockMode) {
+                overlappingLoops.forEach((other) => {
+                  other.active = false;
+                });
+              }
+
+              targetLoop.active = true;
+              targetLoop.x = blob.x;
+              targetLoop.y = clampedY;
+              triggerAuditionNote(targetLoop);
+
+              if (state.selectedShapeTab !== blob.shape) {
+                selectShapeTab(blob.shape);
+              } else {
+                updateBadgeUI();
+              }
+              holder.frames = 0;
+              holder.cooldown = COOLDOWN_FRAMES;
+            }
+          }
+        });
+      }
+
+      Object.keys(state.trackHold).forEach((k) => {
+        if (!activeTrackKeysThisFrame.has(k)) {
+          const h = state.trackHold[k];
+          if (h.cooldown > 0) h.cooldown--;
+          h.frames = Math.max(0, h.frames - 1);
+        }
+      });
+    }
+
+    // =========================================================================
+    // 6. UI BADGE RENDERERS (BOTH VERSIONS)
+    // =========================================================================
+    function renderShapeTabList() {
+      const container = document.getElementById('loopList');
+      const descEl = document.getElementById('shapeTabDesc');
+      const shape = state.selectedShapeTab;
+      const sInfo = shapeMeta[shape];
+      descEl.textContent = sInfo.title;
+
+      container.innerHTML = '';
+      COLOR_KEYS.forEach((color) => {
+        const key = `${shape}_${color}`;
+        const loop = state.loops[key];
+        const cInfo = colorMeta[color];
+
+        const row = document.createElement('div');
+        row.id = `badge-${key}`;
+        row.className = `p-1.5 rounded-lg border border-transparent hover:border-white/15 flex justify-between items-center transition cursor-pointer ${loop.active ? 'active-badge' : ''}`;
+        row.innerHTML = `
+          <span class="flex items-center gap-1.5">
+            <span class="w-3.5 h-3.5 rounded-sm ${cInfo.badgeBg} inline-flex items-center justify-center text-[9px] font-extrabold text-slate-950 shadow">${sInfo.symbol}</span>
+            <b>${cInfo.en} ${sInfo.en}</b> : <span class="text-slate-200">${loop.name}</span>
+          </span>
+          <span class="text-[10px] ${loop.active ? '' : 'opacity-60'}">${loop.active ? 'PLAYING' : 'OFF'}</span>
+        `;
+        row.addEventListener('click', async () => {
+          if (!state.isRunning) {
+            await initAudio();
+            state.isRunning = true;
+            statusDot.classList.replace('bg-rose-500', 'bg-emerald-400');
+          }
+          loop.active = !loop.active;
+          if (loop.active) triggerAuditionNote(loop);
+          updateBadgeUI();
+        });
+        container.appendChild(row);
+      });
+
+      updateActiveLoopsBar();
+    }
+
+    function updateActiveLoopsBar() {
+      const bar = document.getElementById('activeLoopsBar');
+      const activeList = Object.values(state.loops).filter(l => l.active);
+      if (activeList.length === 0) {
+        bar.innerHTML = '<span class="text-[9.5px] text-slate-500 px-1">No active loops playing (Show a shape prop or click below)</span>';
+        return;
+      }
+      bar.innerHTML = '';
+      activeList.forEach((loop) => {
+        const chip = document.createElement('button');
+        chip.className = 'px-2 py-0.5 rounded-full text-[9.5px] font-bold flex items-center gap-1 bg-slate-900 border cursor-pointer hover:opacity-80 transition';
+        chip.style.borderColor = loop.color;
+        chip.style.color = loop.color;
+        chip.innerHTML = `<span>${ loop.label }</span><span class="text-white/70">×</span>`;
+        chip.title = `${loop.name} (Click to stop)`;
+        chip.addEventListener('click', () => {
+          loop.active = false;
+          updateBadgeUI();
+        });
+        bar.appendChild(chip);
+      });
+    }
+
+    function selectShapeTab(shape) {
+      state.selectedShapeTab = shape;
+      document.querySelectorAll('.shape-tab-btn').forEach((btn) => {
+        if (btn.getAttribute('data-tab') === shape) {
+          btn.className = 'shape-tab-btn py-1 rounded-lg bg-cyan-500/25 border border-cyan-400 text-white font-bold cursor-pointer';
+        } else {
+          btn.className = 'shape-tab-btn py-1 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 hover:text-white font-semibold cursor-pointer';
+        }
+      });
+      renderShapeTabList();
+    }
+
+    function updateBadgeUI() {
+      renderShapeTabList();
+    }
+
+    function clearAllLoops() {
+      Object.keys(state.loops).forEach(k => state.loops[k].active = false);
+      updateBadgeUI();
+    }
+
+    function updateHandBadgeUI() {
+      Object.keys(state.handLoops).forEach((key) => {
+        const el = document.getElementById(`hand-badge-${key}`);
+        if (!el) return;
+        const statusSpan = el.querySelector('span:last-child');
+        if (state.handLoops[key].active) {
+          el.classList.add('active-badge');
+          statusSpan.textContent = 'PLAYING';
+          statusSpan.classList.remove('opacity-60');
+        } else {
+          el.classList.remove('active-badge');
+          statusSpan.textContent = 'OFF';
+          statusSpan.classList.add('opacity-60');
+        }
+      });
+    }
+
+    function clearAllHandLoops() {
+      Object.keys(state.handLoops).forEach(k => state.handLoops[k].active = false);
+      updateHandBadgeUI();
+    }
+
+    document.querySelectorAll('.hand-loop-badge').forEach((badge) => {
+      badge.addEventListener('click', async () => {
+        if (!state.isRunning) {
+          await initAudio();
+          state.isRunning = true;
+          statusDot.classList.replace('bg-rose-500', 'bg-emerald-400');
+        }
+        const k = badge.getAttribute('data-hkey');
+        if (state.handLoops[k]) {
+          state.handLoops[k].active = !state.handLoops[k].active;
+          updateHandBadgeUI();
+        }
+      });
+    });
+
+    document.querySelectorAll('.shape-tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        selectShapeTab(btn.getAttribute('data-tab'));
+      });
+    });
+
+    renderShapeTabList();
+
+    // =========================================================================
+    // 7. GRAPHIC SCORE CANVAS RENDERER (SUPPORTS BOTH VERSIONS)
+    // =========================================================================
+    function drawStarPath(targetCtx, outerR, innerR, points) {
+      targetCtx.beginPath();
+      for (let i = 0; i < points * 2; i++) {
+        const r = i % 2 === 0 ? outerR : innerR;
+        const a = (i * Math.PI) / points - Math.PI / 2;
+        if (i === 0) targetCtx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+        else targetCtx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      targetCtx.closePath();
+    }
+
+    function drawPolygonPath(targetCtx, radius, sides) {
+      targetCtx.beginPath();
+      for (let i = 0; i < sides; i++) {
+        const a = (i * Math.PI * 2) / sides - Math.PI / 2;
+        if (i === 0) targetCtx.moveTo(Math.cos(a) * radius, Math.sin(a) * radius);
+        else targetCtx.lineTo(Math.cos(a) * radius, Math.sin(a) * radius);
+      }
+      targetCtx.closePath();
+    }
+
+    function drawPlusCrossPath(targetCtx, r, thickness) {
+      const t = thickness;
+      targetCtx.beginPath();
+      targetCtx.moveTo(-t, -r); targetCtx.lineTo(t, -r);
+      targetCtx.lineTo(t, -t);  targetCtx.lineTo(r, -t);
+      targetCtx.lineTo(r, t);   targetCtx.lineTo(t, t);
+      targetCtx.lineTo(t, r);   targetCtx.lineTo(-t, r);
+      targetCtx.lineTo(-t, t);  targetCtx.lineTo(-r, t);
+      targetCtx.lineTo(-r, -t); targetCtx.lineTo(-t, -t);
+      targetCtx.closePath();
+    }
+
+    function drawLBracketPath(targetCtx, r, thickness) {
+      targetCtx.beginPath();
+      targetCtx.moveTo(-r, -r);
+      targetCtx.lineTo(-r + thickness, -r);
+      targetCtx.lineTo(-r + thickness, r - thickness);
+      targetCtx.lineTo(r, r - thickness);
+      targetCtx.lineTo(r, r);
+      targetCtx.lineTo(-r, r);
+      targetCtx.closePath();
+    }
+
+    function drawScene(targetCtx, w, h, includeCamera) {
+      targetCtx.save();
+
+      if (includeCamera && state.cameraActive && !state.hideWebcam && video.readyState >= 2) {
+        targetCtx.save();
+        const vw = video.videoWidth || 640;
+        const vh = video.videoHeight || 480;
+        const canvasAspect = w / h, videoAspect = vw / vh;
+        let sW = vw, sH = vh, sX = 0, sY = 0;
+
+        if (canvasAspect > videoAspect) {
+          sH = vw / canvasAspect; sY = (vh - sH) / 2;
+        } else {
+          sW = vh * canvasAspect; sX = (vw - sW) / 2;
+        }
+
+        if (state.appVersion === 'color_shape') {
+          const bPct = Math.round(100 + state.cvBrightness * 1.2);
+          const cPct = Math.round(state.cvContrast * 100);
+          const sPct = Math.round(state.cvSaturation * 100);
+          targetCtx.filter = `brightness(${bPct}%) contrast(${cPct}%) saturate(${sPct}%)`;
+        }
+        targetCtx.scale(-1, 1);
+        targetCtx.drawImage(video, sX, sY, sW, sH, -w, 0, w, h);
+        targetCtx.filter = 'none';
+        targetCtx.restore();
+
+        targetCtx.fillStyle = 'rgba(9, 10, 15, 0.42)';
+        targetCtx.fillRect(0, 0, w, h);
+      } else {
+        targetCtx.fillStyle = '#090a0f';
+        targetCtx.fillRect(0, 0, w, h);
+      }
+
+      // Pitch Zone Horizontal Guides
+      targetCtx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+      targetCtx.lineWidth = 1;
+      targetCtx.beginPath(); targetCtx.moveTo(0, h * 0.35); targetCtx.lineTo(w, h * 0.35); targetCtx.stroke();
+      targetCtx.beginPath(); targetCtx.moveTo(0, h * 0.65); targetCtx.lineTo(w, h * 0.65); targetCtx.stroke();
+
+      if (includeCamera) {
+        targetCtx.fillStyle = 'rgba(255,255,255,0.14)';
+        targetCtx.font = '600 10px Inter';
+        targetCtx.textAlign = 'right';
+        targetCtx.fillText("HIGH PITCH ZONE (+1 Oct)", w - 18, h * 0.35 - 6);
+        targetCtx.fillText("LOW PITCH ZONE (-1 Oct)", w - 18, h * 0.65 + 14);
+        targetCtx.textAlign = 'left';
+      }
+
+      const time = performance.now() * 0.003;
+      const pulse = 1 + state.beatPulse * 0.25;
+      const stageH = h - SCORE_HEIGHT;
+
+      // =====================================================================
+      // RENDER BRANCH A: COLOR & SHAPE VERSION
+      // =====================================================================
+      if (state.appVersion === 'color_shape') {
+        Object.values(state.loops).forEach((loop) => {
+          if (!loop.active) return;
+          const x = loop.x * w, y = loop.y * stageH, r = 38 * pulse;
+          const speedMod = 0.7 + loop.colorIdx * 0.08;
+
+          targetCtx.save();
+          targetCtx.translate(x, y);
+          targetCtx.strokeStyle = loop.color;
+          targetCtx.fillStyle = loop.color + '44';
+          targetCtx.lineWidth = 3;
+
+          if (loop.shape === 'square') {
+            targetCtx.save();
+            targetCtx.rotate(time * 0.45 * speedMod);
+            targetCtx.fillRect(-r * 0.85, -r * 0.85, r * 1.7, r * 1.7);
+            targetCtx.strokeRect(-r * 0.85, -r * 0.85, r * 1.7, r * 1.7);
+            targetCtx.restore();
+
+            for (let i = -2; i <= 2; i++) {
+              const bh = 16 + Math.sin(time * 4 * speedMod + i + loop.colorIdx) * 10;
+              targetCtx.fillStyle = loop.color;
+              targetCtx.fillRect(i * 10 - 2, -bh / 2, 4, bh);
+            }
+          } else if (loop.shape === 'ring') {
+            targetCtx.beginPath();
+            targetCtx.arc(0, 0, r * 1.18, 0, Math.PI * 2);
+            targetCtx.arc(0, 0, r * 0.54, 0, Math.PI * 2, true);
+            targetCtx.fill();
+
+            targetCtx.beginPath();
+            targetCtx.arc(0, 0, r * 1.18, 0, Math.PI * 2);
+            targetCtx.stroke();
+
+            targetCtx.setLineDash([6, 5]);
+            targetCtx.beginPath();
+            targetCtx.arc(0, 0, r * 0.54, 0, Math.PI * 2);
+            targetCtx.stroke();
+            targetCtx.setLineDash([]);
+
+            const orbitCount = 2 + (loop.colorIdx % 4);
+            for (let i = 0; i < orbitCount; i++) {
+              const ang = time * speedMod + (i * Math.PI * 2) / orbitCount;
+              const ox = Math.cos(ang) * r * 0.86;
+              const oy = Math.sin(ang) * r * 0.86;
+              targetCtx.beginPath();
+              targetCtx.arc(ox, oy, 4.5, 0, Math.PI * 2);
+              targetCtx.fillStyle = '#ffffff';
+              targetCtx.fill();
+            }
+          } else if (loop.shape === 'triangle') {
+            for (let layer = 0; layer < 2; layer++) {
+              targetCtx.save();
+              targetCtx.rotate((layer === 0 ? 1 : -1) * time * 0.6 * speedMod + layer * (Math.PI / 3));
+              drawPolygonPath(targetCtx, layer === 0 ? r * 1.2 : r * 0.75, 3);
+              if (layer === 0) targetCtx.fill();
+              targetCtx.stroke();
+              targetCtx.restore();
+            }
+          } else if (loop.shape === 'cross') {
+            targetCtx.save();
+            targetCtx.rotate(time * 0.4 * speedMod);
+            drawPlusCrossPath(targetCtx, r * 1.15, r * 0.32);
+            targetCtx.fill();
+            targetCtx.stroke();
+            targetCtx.restore();
+
+            targetCtx.beginPath();
+            targetCtx.arc(0, 0, r * 0.52, 0, Math.PI * 2);
+            targetCtx.stroke();
+          } else if (loop.shape === 'line') {
+            targetCtx.save();
+            targetCtx.rotate(Math.sin(time * 0.5 * speedMod + loop.colorIdx) * 0.3);
+            targetCtx.lineWidth = 7;
+            targetCtx.lineCap = 'round';
+            targetCtx.beginPath();
+            targetCtx.moveTo(-r * 1.45, 0);
+            targetCtx.lineTo(r * 1.45, 0);
+            targetCtx.stroke();
+
+            targetCtx.lineWidth = 2.5;
+            targetCtx.beginPath();
+            for (let lx = -r * 1.35; lx <= r * 1.35; lx += 8) {
+              const ly = Math.sin(time * 6 * speedMod + lx * 0.14) * 15 * pulse;
+              if (lx === -r * 1.35) targetCtx.moveTo(lx, ly);
+              else targetCtx.lineTo(lx, ly);
+            }
+            targetCtx.stroke();
+            targetCtx.restore();
+          } else if (loop.shape === 'star') {
+            targetCtx.save();
+            targetCtx.rotate(time * 0.5 * speedMod);
+            drawStarPath(targetCtx, r * 1.25, r * 0.50, 5);
+            targetCtx.fill();
+            targetCtx.stroke();
+            targetCtx.restore();
+          } else if (loop.shape === 'lshape') {
+            targetCtx.save();
+            targetCtx.rotate(Math.sin(time * 2 * speedMod) * 0.18);
+            drawLBracketPath(targetCtx, r * 1.05, r * 0.42);
+            targetCtx.fill();
+            targetCtx.stroke();
+            targetCtx.restore();
+
+            targetCtx.strokeRect(0, -r * 0.72, r * 0.72, r * 0.72);
+          }
+
+          targetCtx.restore();
+
+          if (includeCamera) {
+            targetCtx.fillStyle = '#ffffff';
+            targetCtx.font = 'bold 11px Inter, sans-serif';
+            targetCtx.textAlign = 'center';
+            const pZone = getPitchZone(loop.y);
+            const labelExt = pZone.shift !== 0 ? (pZone.shift > 0 ? ' [HIGH]' : ' [LOW]') : '';
+            targetCtx.fillText(`${loop.label} · ${loop.name}${labelExt}`, x, y + r + 20);
+          }
+        });
+
+        // Dual Index BPM Stretch Visual
+        if (includeCamera && state.stretching) {
+          const x1 = state.stretching.x1 * w, y1 = state.stretching.y1 * stageH;
+          const x2 = state.stretching.x2 * w, y2 = state.stretching.y2 * stageH;
+          const midX = (x1 + x2) / 2, midY = (y1 + y2) / 2;
+
+          targetCtx.strokeStyle = 'rgba(56, 189, 248, 0.35)';
+          targetCtx.lineWidth = 6;
+          targetCtx.lineCap = 'round';
+          targetCtx.beginPath();
+          targetCtx.moveTo(midX, stageH * 0.15);
+          targetCtx.lineTo(midX, stageH * 0.85);
+          targetCtx.stroke();
+
+          targetCtx.beginPath();
+          targetCtx.moveTo(x1, y1);
+          targetCtx.lineTo(x2, y2);
+          targetCtx.strokeStyle = '#38bdf8';
+          targetCtx.lineWidth = 4;
+          targetCtx.setLineDash([8, 6]);
+          targetCtx.stroke();
+          targetCtx.setLineDash([]);
+
+          targetCtx.fillStyle = '#ffffff';
+          targetCtx.font = '800 22px Inter';
+          targetCtx.textAlign = 'center';
+          targetCtx.fillText(`☝️☝️↕️ ${state.currentBpm} BPM`, midX, midY - 18);
+        }
+
+        // Live Detected Prop Preview & Edge Hull
+        if (includeCamera && !state.bpmControlActive) {
+          latestBlobs.forEach((blob) => {
+            const bx = blob.x * w;
+            const by = blob.y * stageH;
+            const cInfo = colorMeta[blob.color] || { hex: '#ffffff', en: blob.color };
+            const sInfo = shapeMeta[blob.shape] || { symbol: '■', en: blob.shape };
+
+            if (blob.edgePoints && blob.edgePoints.length > 0 && state.cvEdgeStrength > 0.1) {
+              targetCtx.save();
+              targetCtx.fillStyle = '#ffffff';
+              targetCtx.shadowColor = cInfo.hex;
+              targetCtx.shadowBlur = 6 * state.cvEdgeStrength;
+              for (let i = 0; i < blob.edgePoints.length; i++) {
+                const ex = blob.edgePoints[i][0] * w;
+                const ey = blob.edgePoints[i][1] * stageH;
+                targetCtx.fillRect(ex - 1.5, ey - 1.5, 3, 3);
+              }
+              if (blob.minX !== undefined) {
+                targetCtx.strokeStyle = cInfo.hex;
+                targetCtx.lineWidth = 1.5;
+                targetCtx.setLineDash([4, 4]);
+                targetCtx.strokeRect(
+                  blob.minX * w,
+                  blob.minY * stageH,
+                  (blob.maxX - blob.minX) * w,
+                  (blob.maxY - blob.minY) * stageH
+                );
+                targetCtx.setLineDash([]);
+              }
+              targetCtx.restore();
+            }
+
+            targetCtx.save();
+            targetCtx.translate(bx, by);
+            const isIgnored = Boolean(blob.ignoredByMode);
+            targetCtx.strokeStyle = isIgnored ? 'rgba(148, 163, 184, 0.5)' : cInfo.hex;
+            targetCtx.fillStyle = isIgnored ? 'rgba(148, 163, 184, 0.15)' : cInfo.hex + '33';
+            targetCtx.lineWidth = 2.5;
+
+            const previewR = 26;
+            if (blob.shape === 'square') {
+              targetCtx.fillRect(-previewR, -previewR, previewR * 2, previewR * 2);
+              targetCtx.strokeRect(-previewR, -previewR, previewR * 2, previewR * 2);
+            } else if (blob.shape === 'ring') {
+              targetCtx.beginPath();
+              targetCtx.arc(0, 0, previewR * 1.15, 0, Math.PI * 2);
+              targetCtx.arc(0, 0, previewR * 0.55, 0, Math.PI * 2, true);
+              targetCtx.fill();
+              targetCtx.beginPath();
+              targetCtx.arc(0, 0, previewR * 1.15, 0, Math.PI * 2);
+              targetCtx.stroke();
+            } else if (blob.shape === 'triangle') {
+              drawPolygonPath(targetCtx, previewR * 1.2, 3);
+              targetCtx.fill(); targetCtx.stroke();
+            } else if (blob.shape === 'cross') {
+              drawPlusCrossPath(targetCtx, previewR * 1.2, previewR * 0.35);
+              targetCtx.fill(); targetCtx.stroke();
+            } else if (blob.shape === 'line') {
+              targetCtx.lineWidth = 7;
+              targetCtx.lineCap = 'round';
+              targetCtx.beginPath();
+              targetCtx.moveTo(-previewR * 1.5, 0);
+              targetCtx.lineTo(previewR * 1.5, 0);
+              targetCtx.stroke();
+            } else if (blob.shape === 'star') {
+              drawStarPath(targetCtx, previewR * 1.3, previewR * 0.52, 5);
+              targetCtx.fill(); targetCtx.stroke();
+            } else if (blob.shape === 'lshape') {
+              drawLBracketPath(targetCtx, previewR * 1.1, previewR * 0.45);
+              targetCtx.fill(); targetCtx.stroke();
+            }
+            targetCtx.restore();
+
+            if (blob.progress && blob.progress > 0) {
+              targetCtx.beginPath();
+              targetCtx.arc(bx, by, 46, -Math.PI / 2, -Math.PI / 2 + blob.progress * Math.PI * 2);
+              targetCtx.strokeStyle = blob.replacingName ? '#f59e0b' : '#ffffff';
+              targetCtx.lineWidth = 5;
+              targetCtx.stroke();
+            }
+
+            targetCtx.fillStyle = isIgnored ? '#94a3b8' : '#ffffff';
+            targetCtx.font = 'bold 12px Inter, sans-serif';
+            targetCtx.textAlign = 'center';
+            const tagText = `${sInfo.symbol} ${cInfo.en} ${sInfo.en}`;
+            if (isIgnored) {
+              targetCtx.fillText(`${tagText} — ${blob.ignoredByMode}`, bx, by - 54);
+            } else if (blob.alreadyLatched) {
+              targetCtx.fillStyle = '#38bdf8';
+              targetCtx.fillText(`${tagText} (LOCKED & LOOPING)`, bx, by - 54);
+            } else if (blob.replacingName) {
+              targetCtx.fillStyle = '#fbbf24';
+              targetCtx.fillText(`${tagText} ⇄ Replacing ${blob.replacingName}`, bx, by - 54);
+            } else {
+              const loopTitle = blob.resolvedKey && state.loops[blob.resolvedKey] ? ` → ${state.loops[blob.resolvedKey].name}` : '';
+              targetCtx.fillText(`${tagText}${loopTitle}`, bx, by - 54);
+            }
+          });
+        }
+
+        // Bottom Timeline (7 Shape Rows)
+        const scoreTop = h - SCORE_HEIGHT;
+        targetCtx.fillStyle = 'rgba(10, 12, 20, 0.94)';
+        targetCtx.fillRect(0, scoreTop, w, SCORE_HEIGHT);
+        targetCtx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+        targetCtx.beginPath(); targetCtx.moveTo(0, scoreTop); targetCtx.lineTo(w, scoreTop); targetCtx.stroke();
+
+        if (includeCamera) {
+          targetCtx.fillStyle = 'rgba(148, 163, 184, 0.75)';
+          targetCtx.font = 'bold 10px Inter, sans-serif';
+          targetCtx.textAlign = 'left';
+          targetCtx.fillText('LISTENING SCORE TIMELINE (COLOR & SHAPE VERSION — 7 SHAPES × 10 COLORS)', 16, scoreTop + 14);
+
+          SHAPE_KEYS.forEach((sk, sIdx) => {
+            const ry = scoreTop + 26 + sIdx * 14;
+            targetCtx.fillStyle = 'rgba(148, 163, 184, 0.55)';
+            targetCtx.font = 'bold 9px Inter';
+            targetCtx.fillText(`${shapeMeta[sk].symbol} ${shapeMeta[sk].en}`, 16, ry + 7);
+          });
+        }
+
+        const sliceWidth = 3;
+        const minTimelineX = includeCamera ? 76 : 0;
+        const startX = Math.max(minTimelineX, w - state.scoreHistory.length * sliceWidth);
+
+        for (let i = 0; i < state.scoreHistory.length; i++) {
+          const snap = state.scoreHistory[i];
+          const sx = startX + i * sliceWidth;
+          if (sx < minTimelineX) continue;
+
+          SHAPE_KEYS.forEach((sk, sIdx) => {
+            const colorsForShape = snap[sk];
+            if (colorsForShape && colorsForShape.length > 0) {
+              const ry = scoreTop + 24 + sIdx * 14;
+              const barH = Math.max(2, 9 / colorsForShape.length);
+              colorsForShape.forEach((hex, cIdx) => {
+                targetCtx.fillStyle = hex;
+                targetCtx.fillRect(sx, ry + cIdx * barH, sliceWidth, barH);
+              });
+            }
+          });
+        }
+      } else {
+        // =====================================================================
+        // RENDER BRANCH B: HAND GESTURE VERSION
+        // =====================================================================
+        if (state.colorEnabled) {
+          if (state.handColorActive.red) {
+            const cx = state.handColorPos.red.x * w, cy = state.handColorPos.red.y * stageH;
+            targetCtx.fillStyle = 'rgba(239, 68, 68, 0.75)';
+            targetCtx.beginPath(); targetCtx.arc(cx, cy, 52 * pulse, 0, Math.PI * 2); targetCtx.fill();
+            targetCtx.strokeStyle = '#fecaca'; targetCtx.lineWidth = 3; targetCtx.stroke();
+          }
+          if (state.handColorActive.yellow) {
+            const cx = state.handColorPos.yellow.x * w, cy = state.handColorPos.yellow.y * stageH, r = 48 * pulse;
+            targetCtx.fillStyle = 'rgba(250, 204, 21, 0.8)'; targetCtx.beginPath();
+            for (let i = 0; i < 3; i++) {
+              const px = cx + Math.cos(time + (i * Math.PI * 2) / 3) * r, py = cy + Math.sin(time + (i * Math.PI * 2) / 3) * r;
+              if (i === 0) targetCtx.moveTo(px, py); else targetCtx.lineTo(px, py);
+            }
+            targetCtx.closePath(); targetCtx.fill();
+          }
+          if (state.handColorActive.blue) {
+            const cx = state.handColorPos.blue.x * w, cy = state.handColorPos.blue.y * stageH, barW = state.handColorPos.blue.width;
+            targetCtx.strokeStyle = '#38bdf8'; targetCtx.lineWidth = 14; targetCtx.lineCap = 'round';
+            targetCtx.beginPath(); targetCtx.moveTo(cx - barW / 2, cy); targetCtx.lineTo(cx + barW / 2, cy); targetCtx.stroke();
+          }
+        }
+
+        Object.entries(state.handLoops).forEach(([key, loop]) => {
+          if (!loop.active) return;
+          const x = loop.x * w, y = loop.y * stageH, r = 42 * pulse;
+          targetCtx.save(); targetCtx.translate(x, y);
+          targetCtx.strokeStyle = loop.color; targetCtx.fillStyle = loop.color + '44'; targetCtx.lineWidth = 3;
+
+          switch (key) {
+            case '1': targetCtx.beginPath(); targetCtx.arc(0, 0, r, 0, Math.PI * 2); targetCtx.fill(); targetCtx.stroke(); targetCtx.beginPath(); targetCtx.arc(0, 0, r * 1.35, 0, Math.PI * 2); targetCtx.stroke(); break;
+            case '2': targetCtx.rotate(time * 0.5); targetCtx.fillRect(-r, -r, r * 2, r * 2); targetCtx.strokeRect(-r, -r, r * 2, r * 2); break;
+            case '3': for (let i = -2; i <= 2; i++) { targetCtx.beginPath(); targetCtx.arc(i * 22, Math.sin(time * 3 + i) * 18, 8, 0, Math.PI * 2); targetCtx.fillStyle = loop.color; targetCtx.fill(); } break;
+            case '4': for (let i = 0; i < 8; i++) { const a = (i * Math.PI) / 4 + time * 0.3; targetCtx.beginPath(); targetCtx.moveTo(0, 0); targetCtx.lineTo(Math.cos(a) * r * 1.4, Math.sin(a) * r * 1.4); targetCtx.stroke(); } break;
+            case 'thumb': targetCtx.rotate(Math.PI / 4 + time * 0.8); targetCtx.strokeRect(-r * 0.8, -r * 0.8, r * 1.6, r * 1.6); break;
+            case 'rock': targetCtx.beginPath(); for (let i = -50; i <= 50; i += 10) { const py = (i % 20 === 0 ? -18 : 18) * pulse; if (i === -50) targetCtx.moveTo(i, py); else targetCtx.lineTo(i, py); } targetCtx.stroke(); break;
+            case 'ok': for (let i = -2; i <= 2; i++) { const bh = 28 + Math.sin(time * 4 + i) * 14; targetCtx.fillStyle = loop.color; targetCtx.fillRect(i * 18 - 5, -bh / 2, 10, bh); } break;
+            case 'call': targetCtx.setLineDash([8, 6]); targetCtx.rotate(-time * 1.5); targetCtx.beginPath(); targetCtx.arc(0, 0, r * 1.1, 0, Math.PI * 2); targetCtx.stroke(); break;
+            case 'pinch': for (let i = 0; i < 3; i++) { const size = r * (0.5 + 0.5 * Math.sin(time * 5 + i)); targetCtx.rotate(Math.PI / 3); targetCtx.beginPath(); targetCtx.moveTo(0, -size); targetCtx.lineTo(size * 0.866, size * 0.5); targetCtx.lineTo(-size * 0.866, size * 0.5); targetCtx.closePath(); targetCtx.stroke(); } break;
+            case 'gun': targetCtx.beginPath(); targetCtx.moveTo(-r, 0); targetCtx.lineTo(r, 0); targetCtx.moveTo(0, -r); targetCtx.lineTo(0, r); targetCtx.arc(0, 0, r * 0.6, 0, Math.PI * 2); targetCtx.stroke(); break;
+            case 'spiderman': for (let i = 0; i < 5; i++) { const a = (i * Math.PI * 2) / 5 + time; targetCtx.beginPath(); targetCtx.moveTo(0, 0); targetCtx.lineTo(Math.cos(a) * r * 1.2, Math.sin(a) * r * 1.2); targetCtx.stroke(); } targetCtx.beginPath(); targetCtx.arc(0, 0, r * 0.6, 0, Math.PI * 2); targetCtx.stroke(); break;
+            case 'pinky': targetCtx.beginPath(); for (let i = 0; i < 10; i++) { const rad = i % 2 === 0 ? r : r * 0.4, a = (i * Math.PI) / 5 + time * 0.5; if (i === 0) targetCtx.moveTo(Math.cos(a) * rad, Math.sin(a) * rad); else targetCtx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad); } targetCtx.closePath(); targetCtx.fill(); targetCtx.stroke(); break;
+          }
+
+          targetCtx.restore();
+          if (includeCamera) {
+            targetCtx.fillStyle = '#ffffff'; targetCtx.font = 'bold 12px Inter, sans-serif'; targetCtx.textAlign = 'center';
+            const pZone = getPitchZone(loop.y);
+            let labelExt = '';
+            if (!['Snare Beat', 'Trap Hats'].includes(loop.name) && pZone.shift !== 0) labelExt = pZone.shift > 0 ? ' [HIGH]' : ' [LOW]';
+            targetCtx.fillText(loop.name + labelExt, x, y + r + 20);
+          }
+        });
+
+        if (includeCamera && state.stretching) {
+          const x1 = state.stretching.x1 * w, y1 = state.stretching.y1 * h;
+          const x2 = state.stretching.x2 * w, y2 = state.stretching.y2 * h;
+          targetCtx.beginPath(); targetCtx.moveTo(x1, y1); targetCtx.lineTo(x2, y2);
+          targetCtx.strokeStyle = 'rgba(255, 255, 255, 0.5)'; targetCtx.lineWidth = 4;
+          targetCtx.setLineDash([10, 10]); targetCtx.stroke(); targetCtx.setLineDash([]);
+
+          targetCtx.fillStyle = '#fff'; targetCtx.font = 'bold 24px Inter'; targetCtx.textAlign = 'center';
+          targetCtx.fillText(`${state.currentBpm} BPM`, (x1 + x2) / 2, (y1 + y2) / 2 - 20);
+        }
+
+        if (includeCamera && state.gestureEnabled && !state.stretching) {
+          latestHands.forEach((hand) => {
+            const hx = hand.x * w, hy = hand.y * h;
+            targetCtx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+            hand.lm.forEach((pt) => { targetCtx.beginPath(); targetCtx.arc((1 - pt.x) * w, pt.y * h, 3, 0, Math.PI * 2); targetCtx.fill(); });
+
+            if (hand.gesture && hand.progress > 0) {
+              targetCtx.beginPath(); targetCtx.arc(hx, hy, 46, -Math.PI / 2, -Math.PI / 2 + hand.progress * Math.PI * 2);
+              targetCtx.strokeStyle = hand.label === '🎨 TO COLOR VER.' ? '#22d3ee' : ((hand.gesture === 'fist' || state.openPalmFrames > 0) ? '#f43f5e' : '#38bdf8');
+              targetCtx.lineWidth = 6; targetCtx.stroke();
+
+              targetCtx.fillStyle = '#ffffff'; targetCtx.font = 'bold 14px Inter, sans-serif'; targetCtx.textAlign = 'center';
+              if (hand.label) targetCtx.fillText(hand.label, hx, hy - 56);
+              else if (state.openPalmFrames > 0) targetCtx.fillText("GENRE", hx, hy - 56);
+              else targetCtx.fillText(hand.gesture.toUpperCase(), hx, hy - 56);
+            }
+          });
+        }
+
+        const scoreTop = h - SCORE_HEIGHT;
+        targetCtx.fillStyle = 'rgba(10, 12, 20, 0.92)'; targetCtx.fillRect(0, scoreTop, w, SCORE_HEIGHT);
+        targetCtx.strokeStyle = 'rgba(255, 255, 255, 0.15)'; targetCtx.beginPath(); targetCtx.moveTo(0, scoreTop); targetCtx.lineTo(w, scoreTop); targetCtx.stroke();
+        if (includeCamera) {
+          targetCtx.fillStyle = 'rgba(148, 163, 184, 0.7)'; targetCtx.font = 'bold 10px Inter, sans-serif'; targetCtx.textAlign = 'left';
+          targetCtx.fillText('LISTENING SCORE TIMELINE (HAND VERSION — 12 GESTURES + R/Y/B)', 16, scoreTop + 16);
+        }
+
+        const sliceWidth = 3, startX = w - state.handScoreHistory.length * sliceWidth;
+        for (let i = 0; i < state.handScoreHistory.length; i++) {
+          const snap = state.handScoreHistory[i], sx = startX + i * sliceWidth;
+          if (snap.red) { targetCtx.fillStyle = '#ef4444'; targetCtx.fillRect(sx, scoreTop + 24, sliceWidth, 6); }
+          if (snap.yellow) { targetCtx.fillStyle = '#facc15'; targetCtx.fillRect(sx, scoreTop + 32, sliceWidth, 4); }
+          if (snap.blue) { targetCtx.fillStyle = '#38bdf8'; targetCtx.fillRect(sx, scoreTop + 38, sliceWidth, 5); }
+
+          const keys = Object.keys(state.handLoops);
+          keys.forEach((k, trackIdx) => {
+            if (snap.loops[k]) {
+              targetCtx.fillStyle = state.handLoops[k].color;
+              targetCtx.fillRect(sx, scoreTop + 47 + trackIdx * 4.5, sliceWidth, 3.5);
+            }
+          });
+        }
+      }
+
+      targetCtx.restore();
+    }
+
+    function recordListeningScoreSlice() {
+      if (!state.isRunning) return;
+      if (state.appVersion === 'color_shape') {
+        const snap = {};
+        SHAPE_KEYS.forEach((sk) => {
+          const activeHexes = [];
+          COLOR_KEYS.forEach((ck) => {
+            const l = state.loops[`${sk}_${ck}`];
+            if (l && l.active) activeHexes.push(l.color);
+          });
+          snap[sk] = activeHexes;
+        });
+        state.scoreHistory.push(snap);
+        if (state.scoreHistory.length > Math.ceil((window.innerWidth - 80) / 3)) {
+          state.scoreHistory.shift();
+        }
+      } else {
+        const activeMap = {};
+        Object.keys(state.handLoops).forEach(k => activeMap[k] = state.handLoops[k].active);
+        state.handScoreHistory.push({
+          red: state.colorEnabled && state.handColorActive.red,
+          yellow: state.colorEnabled && state.handColorActive.yellow,
+          blue: state.colorEnabled && state.handColorActive.blue,
+          loops: activeMap
+        });
+        if (state.handScoreHistory.length > Math.ceil(window.innerWidth / 3)) {
+          state.handScoreHistory.shift();
+        }
+      }
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      state.beatPulse *= 0.88;
+
+      if (state.isRunning) {
+        if (state.appVersion === 'color_shape') {
+          processColorAndShapes();
+        } else {
+          detectHandVersionColors();
+        }
+        recordListeningScoreSlice();
+
+        if (state.cameraActive && state.gestureEnabled && handsDetector && !isSendingHand && video.readyState >= 2) {
+          isSendingHand = true;
+          handsDetector.send({ image: video }).finally(() => { isSendingHand = false; });
+        }
+      }
+
+      drawScene(ctx, canvas.width, canvas.height, true);
+      if (dualWindow && !dualWindow.closed && dualCtx && dualCanvas) {
+        drawScene(dualCtx, dualCanvas.width, dualCanvas.height, false);
+      }
+    }
+
+    window.onload = function () {
+      animate();
+    };
+
+    // =========================================================================
+    // 8. UI EVENT LISTENERS & MODE PRESETS
+    // =========================================================================
+    startBtn.addEventListener('click', async () => {
+      startBtn.disabled = true;
+      startBtn.textContent = 'Loading Camera & AI...';
+      errorMsg.classList.add('hidden');
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480, facingMode: 'user' },
+          audio: false
+        });
+        video.srcObject = stream;
+        await video.play();
+        await initHands();
+        await initAudio();
+
+        state.cameraActive = true;
+        state.isRunning = true;
+        statusDot.classList.replace('bg-rose-500', 'bg-emerald-400');
+        startBtn.textContent = '📷 Loop Station Running';
+        startBtn.classList.replace('from-indigo-500', 'from-emerald-600');
+        startBtn.classList.replace('to-cyan-500', 'to-teal-600');
+      } catch (err) {
+        errorMsg.textContent = `Camera permission error (${err.message}). You can play immediately using 'Virtual Mode' on the right.`;
+        errorMsg.classList.remove('hidden');
+        startBtn.disabled = false;
+        startBtn.textContent = '📷 Start Camera & Audio';
+      }
+    });
+
+    simOnlyBtn.addEventListener('click', async () => {
+      await initAudio();
+      state.isRunning = true;
+      statusDot.classList.replace('bg-rose-500', 'bg-cyan-400');
+      simOnlyBtn.textContent = '✨ Virtual Active';
+      if (state.appVersion !== 'color_shape') {
+        setAppVersion('color_shape');
+      }
+      if (!state.sim.enabled) {
+        document.getElementById('toggleSimBtn').click();
+      }
+      showToast('Virtual 70-Instrument Simulator Ready');
+    });
+
+    function syncModeButtonsUI() {
+      const colorBtn = document.getElementById('toggleColorBtn');
+      const handColorBtn = document.getElementById('handToggleColorBtn');
+      const shapeBtn = document.getElementById('toggleShapeBtn');
+      const descEl = document.getElementById('activeModeDesc');
+      const presetBoth = document.getElementById('presetBothBtn');
+      const presetColor = document.getElementById('presetColorOnlyBtn');
+      const presetShape = document.getElementById('presetShapeOnlyBtn');
+
+      colorBtn.textContent = `10-Color Mode: ${state.colorEnabled ? 'ON' : 'OFF'}`;
+      colorBtn.className = state.colorEnabled
+        ? 'py-1.5 px-2 rounded-lg border border-emerald-500/50 bg-emerald-500/20 text-emerald-200 font-medium transition cursor-pointer'
+        : 'py-1.5 px-2 rounded-lg border border-slate-600 bg-slate-800/70 text-slate-400 font-medium transition cursor-pointer';
+
+      if (handColorBtn) {
+        handColorBtn.textContent = `Color Mode (R/Y/B): ${state.colorEnabled ? 'ON' : 'OFF'}`;
+        handColorBtn.className = state.colorEnabled
+          ? 'py-2 px-2 rounded-lg border border-emerald-500/50 bg-emerald-500/20 text-emerald-200 font-medium transition cursor-pointer'
+          : 'py-2 px-2 rounded-lg border border-slate-600 bg-slate-800/70 text-slate-400 font-medium transition cursor-pointer';
+      }
+
+      shapeBtn.textContent = `7-Shape Mode: ${state.shapeEnabled ? 'ON' : 'OFF'}`;
+      shapeBtn.className = state.shapeEnabled
+        ? 'py-1.5 px-2 rounded-lg border border-emerald-500/50 bg-emerald-500/20 text-emerald-200 font-medium transition cursor-pointer'
+        : 'py-1.5 px-2 rounded-lg border border-slate-600 bg-slate-800/70 text-slate-400 font-medium transition cursor-pointer';
+
+      const activeClass = 'py-1.5 px-2 rounded-lg bg-cyan-500/25 border border-cyan-400 text-white font-bold transition cursor-pointer';
+      const inactiveClass = 'py-1.5 px-2 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 hover:text-white font-semibold transition cursor-pointer';
+
+      presetBoth.className = (state.colorEnabled && state.shapeEnabled) ? activeClass : inactiveClass;
+      presetColor.className = (state.colorEnabled && !state.shapeEnabled) ? activeClass : inactiveClass;
+      presetShape.className = (!state.colorEnabled && state.shapeEnabled) ? activeClass : inactiveClass;
+
+      if (state.colorEnabled && state.shapeEnabled) {
+        descEl.textContent = '7 Shapes × 10 Colors (All 70 Instruments)';
+      } else if (state.colorEnabled && !state.shapeEnabled) {
+        descEl.textContent = '🎨 Color Only ON (■ Square 10 Colors Only)';
+      } else if (!state.colorEnabled && state.shapeEnabled) {
+        descEl.textContent = '📐 Shape Only ON (7 Shapes Color-Agnostic)';
+      } else {
+        descEl.textContent = '⚠️ Both Color & Shape Detection OFF';
+      }
+    }
+
+    document.getElementById('toggleColorBtn').addEventListener('click', () => {
+      state.colorEnabled = !state.colorEnabled;
+      syncModeButtonsUI();
+    });
+    document.getElementById('handToggleColorBtn').addEventListener('click', () => {
+      state.colorEnabled = !state.colorEnabled;
+      syncModeButtonsUI();
+    });
+
+    document.getElementById('toggleShapeBtn').addEventListener('click', () => {
+      state.shapeEnabled = !state.shapeEnabled;
+      syncModeButtonsUI();
+    });
+
+    document.getElementById('presetBothBtn').addEventListener('click', () => {
+      state.colorEnabled = true;
+      state.shapeEnabled = true;
+      syncModeButtonsUI();
+      showToast('7 Shapes × 10 Colors (All 70) ON');
+    });
+
+    document.getElementById('presetColorOnlyBtn').addEventListener('click', () => {
+      state.colorEnabled = true;
+      state.shapeEnabled = false;
+      selectShapeTab('square');
+      if (state.sim.shape !== 'square') {
+        state.sim.shape = 'square';
+        highlightActiveShapeButton('square');
+      }
+      syncModeButtonsUI();
+      showToast('🎨 Color Only Mode (■ Square 10 Colors)');
+    });
+
+    document.getElementById('presetShapeOnlyBtn').addEventListener('click', () => {
+      state.colorEnabled = false;
+      state.shapeEnabled = true;
+      syncModeButtonsUI();
+      showToast('📐 Shape Only Mode (7 Shapes Color-Agnostic)');
+    });
+
+    function toggleGestureHandler() {
+      state.gestureEnabled = !state.gestureEnabled;
+      const gBtn1 = document.getElementById('toggleGestureBtn');
+      const gBtn2 = document.getElementById('handToggleGestureBtn');
+      gBtn1.textContent = `Hand Macros (BPM/Genre): ${state.gestureEnabled ? 'ON' : 'OFF'}`;
+      gBtn1.className = state.gestureEnabled
+        ? 'py-1.5 px-2 rounded-lg border border-emerald-500/50 bg-emerald-500/20 text-emerald-200 font-medium transition cursor-pointer'
+        : 'py-1.5 px-2 rounded-lg border border-slate-600 bg-slate-800/70 text-slate-400 font-medium transition cursor-pointer';
+      gBtn2.textContent = `Gesture Mode: ${state.gestureEnabled ? 'ON' : 'OFF'}`;
+      gBtn2.className = state.gestureEnabled
+        ? 'py-2 px-2 rounded-lg border border-emerald-500/50 bg-emerald-500/20 text-emerald-200 font-medium transition cursor-pointer'
+        : 'py-2 px-2 rounded-lg border border-slate-600 bg-slate-800/70 text-slate-400 font-medium transition cursor-pointer';
+    }
+    document.getElementById('toggleGestureBtn').addEventListener('click', toggleGestureHandler);
+    document.getElementById('handToggleGestureBtn').addEventListener('click', toggleGestureHandler);
+
+    function toggleBgHandler() {
+      state.hideWebcam = !state.hideWebcam;
+      const b1 = document.getElementById('toggleBgBtn');
+      const b2 = document.getElementById('handToggleBgBtn');
+      b1.textContent = `Hide Cam: ${state.hideWebcam ? 'ON' : 'OFF'}`;
+      b1.className = state.hideWebcam
+        ? 'py-1.5 px-1.5 rounded-lg border border-amber-500/50 bg-amber-500/20 text-amber-200 text-[10px] font-medium transition cursor-pointer'
+        : 'py-1.5 px-1.5 rounded-lg border border-slate-600 bg-slate-800/70 text-slate-300 text-[10px] font-medium transition cursor-pointer';
+      b2.textContent = `Hide Webcam: ${state.hideWebcam ? 'ON' : 'OFF'}`;
+      b2.className = state.hideWebcam
+        ? 'py-2 px-2 rounded-lg border border-amber-500/50 bg-amber-500/20 text-amber-200 font-medium transition cursor-pointer'
+        : 'py-2 px-2 rounded-lg border border-slate-600 bg-slate-800/70 text-slate-300 font-medium transition cursor-pointer';
+    }
+    document.getElementById('toggleBgBtn').addEventListener('click', toggleBgHandler);
+    document.getElementById('handToggleBgBtn').addEventListener('click', toggleBgHandler);
+
+    document.getElementById('sensSlider').addEventListener('input', (e) => {
+      state.pixelThreshold = parseInt(e.target.value, 10);
+      document.getElementById('sensVal').textContent = state.pixelThreshold;
+    });
+
+    // CV Controller Sliders (Brightness, Contrast, Saturation, Edge, Color Sensitivity, Skin Filter)
+    const cvBrightSlider = document.getElementById('cvBrightSlider');
+    const cvContrastSlider = document.getElementById('cvContrastSlider');
+    const cvSatSlider = document.getElementById('cvSatSlider');
+    const cvEdgeSlider = document.getElementById('cvEdgeSlider');
+    const cvColorSensSlider = document.getElementById('cvColorSensSlider');
+    const toggleSkinFilterBtn = document.getElementById('toggleSkinFilterBtn');
+
+    cvBrightSlider.addEventListener('input', (e) => {
+      state.cvBrightness = parseInt(e.target.value, 10);
+      document.getElementById('cvBrightVal').textContent = (state.cvBrightness >= 0 ? '+' : '') + state.cvBrightness;
+    });
+    cvContrastSlider.addEventListener('input', (e) => {
+      const pct = parseInt(e.target.value, 10);
+      state.cvContrast = pct / 100;
+      document.getElementById('cvContrastVal').textContent = pct + '%';
+    });
+    cvSatSlider.addEventListener('input', (e) => {
+      const pct = parseInt(e.target.value, 10);
+      state.cvSaturation = pct / 100;
+      document.getElementById('cvSatVal').textContent = pct + '%';
+    });
+    cvEdgeSlider.addEventListener('input', (e) => {
+      const pct = parseInt(e.target.value, 10);
+      state.cvEdgeStrength = pct / 100;
+      document.getElementById('cvEdgeVal').textContent = pct + '%';
+    });
+    cvColorSensSlider.addEventListener('input', (e) => {
+      state.cvColorSens = parseInt(e.target.value, 10);
+      document.getElementById('cvColorSensVal').textContent = state.cvColorSens + '%';
+    });
+
+    toggleSkinFilterBtn.addEventListener('click', () => {
+      state.skinFilterEnabled = !state.skinFilterEnabled;
+      toggleSkinFilterBtn.textContent = `🙅 Skin Filter: ${state.skinFilterEnabled ? 'ON' : 'OFF'}`;
+      toggleSkinFilterBtn.className = state.skinFilterEnabled
+        ? 'text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/25 border border-emerald-400/60 text-emerald-200 font-bold cursor-pointer'
+        : 'text-[9px] px-1.5 py-0.5 rounded bg-slate-800 border border-white/15 text-slate-400 font-semibold cursor-pointer';
+    });
+
+    document.getElementById('cvResetBtn').addEventListener('click', () => {
+      state.cvBrightness = 8;
+      state.cvContrast = 1.35;
+      state.cvSaturation = 1.45;
+      state.cvEdgeStrength = 1.40;
+      state.cvColorSens = 42;
+      state.pixelThreshold = 28;
+      state.skinFilterEnabled = true;
+      cvBrightSlider.value = 8;
+      cvContrastSlider.value = 135;
+      cvSatSlider.value = 145;
+      cvEdgeSlider.value = 140;
+      cvColorSensSlider.value = 42;
+      document.getElementById('sensSlider').value = 28;
+      document.getElementById('cvBrightVal').textContent = '+8';
+      document.getElementById('cvContrastVal').textContent = '135%';
+      document.getElementById('cvSatVal').textContent = '145%';
+      document.getElementById('cvEdgeVal').textContent = '140%';
+      document.getElementById('cvColorSensVal').textContent = '42%';
+      document.getElementById('sensVal').textContent = '28';
+      toggleSkinFilterBtn.textContent = '🙅 Skin Filter: ON';
+      toggleSkinFilterBtn.className = 'text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/25 border border-emerald-400/60 text-emerald-200 font-bold cursor-pointer';
+      showToast('CV Settings Reset');
+    });
+
+    function syncShapeFilterUI() {
+      document.querySelectorAll('.shape-filter-btn').forEach((btn) => {
+        const sh = btn.getAttribute('data-filter-shape');
+        const on = state.enabledShapes[sh];
+        btn.className = on
+          ? 'shape-filter-btn py-1 rounded bg-emerald-500/25 border border-emerald-400 text-emerald-200 font-bold cursor-pointer transition'
+          : 'shape-filter-btn py-1 rounded bg-slate-800/70 border border-white/10 text-slate-500 line-through font-semibold cursor-pointer transition';
+      });
+    }
+
+    document.querySelectorAll('.shape-filter-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const sh = btn.getAttribute('data-filter-shape');
+        const enabledCount = Object.values(state.enabledShapes).filter(Boolean).length;
+        if (state.enabledShapes[sh] && enabledCount <= 1) {
+          showToast('Keep at least 1 shape enabled');
+          return;
+        }
+        state.enabledShapes[sh] = !state.enabledShapes[sh];
+        syncShapeFilterUI();
+      });
+    });
+
+    document.getElementById('shapePresetBasic3Btn').addEventListener('click', () => {
+      SHAPE_KEYS.forEach(k => { state.enabledShapes[k] = (k === 'square' || k === 'triangle' || k === 'ring'); });
+      syncShapeFilterUI();
+      showToast('Basic 3 Shapes (■ Square, ▲ Triangle, 🍩 Donut) Active');
+    });
+
+    document.getElementById('shapePresetAll7Btn').addEventListener('click', () => {
+      SHAPE_KEYS.forEach(k => { state.enabledShapes[k] = true; });
+      syncShapeFilterUI();
+      showToast('All 7 Shapes Active');
+    });
+
+    document.getElementById('toggleStickyLockBtn').addEventListener('click', (e) => {
+      state.stickyLockMode = !state.stickyLockMode;
+      e.target.textContent = state.stickyLockMode
+        ? '🔒 Sticky Latch (Never Auto-Off): ON'
+        : '🔄 Sticky Latch: OFF (Same-Spot Replace)';
+      e.target.className = state.stickyLockMode
+        ? 'px-2 py-0.5 rounded bg-emerald-500/25 border border-emerald-400/60 text-emerald-200 font-bold cursor-pointer'
+        : 'px-2 py-0.5 rounded bg-amber-500/25 border border-amber-400/60 text-amber-200 font-bold cursor-pointer';
+    });
+
+    document.getElementById('toggleWhiteColorBtn').addEventListener('click', (e) => {
+      state.whiteColorEnabled = !state.whiteColorEnabled;
+      e.target.textContent = `⚪ White Detect: ${state.whiteColorEnabled ? 'ON' : 'OFF'}`;
+      e.target.className = state.whiteColorEnabled
+        ? 'px-2 py-0.5 rounded bg-white/25 border border-white text-white font-bold cursor-pointer'
+        : 'px-2 py-0.5 rounded bg-slate-800 border border-white/15 text-slate-400 font-semibold cursor-pointer';
+      const whitePill = document.getElementById('pill-white');
+      if (whitePill) {
+        whitePill.textContent = state.whiteColorEnabled ? 'White' : 'White(OFF)';
+        whitePill.classList.toggle('opacity-35', !state.whiteColorEnabled);
+      }
+    });
+
+    document.getElementById('clearAllBtn').addEventListener('click', clearAllLoops);
+    document.getElementById('handClearAllBtn').addEventListener('click', clearAllHandLoops);
+
+    let isCollapsed = false;
+    document.getElementById('collapseBtn').addEventListener('click', () => {
+      isCollapsed = !isCollapsed;
+      const panel = document.getElementById('mainPanel');
+      const icon = document.getElementById('collapseIcon');
+      if (isCollapsed) {
+        panel.classList.add('collapsed');
+        icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>';
+      } else {
+        panel.classList.remove('collapsed');
+        icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>';
+      }
+    });
+
+    // Virtual Simulator Controls
+    const toggleSimBtn = document.getElementById('toggleSimBtn');
+    const simControls = document.getElementById('simControls');
+
+    toggleSimBtn.addEventListener('click', async () => {
+      state.sim.enabled = !state.sim.enabled;
+      if (state.sim.enabled && !state.isRunning) {
+        await initAudio();
+        state.isRunning = true;
+        statusDot.classList.replace('bg-rose-500', 'bg-cyan-400');
+      }
+      toggleSimBtn.textContent = state.sim.enabled ? 'ON' : 'OFF';
+      toggleSimBtn.className = state.sim.enabled
+        ? 'px-2.5 py-1 rounded-lg text-[10px] font-bold bg-cyan-500 text-slate-950 cursor-pointer'
+        : 'px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-800 text-slate-300 border border-white/15 cursor-pointer';
+
+      if (state.sim.enabled) {
+        simControls.classList.remove('opacity-50', 'pointer-events-none');
+      } else {
+        simControls.classList.add('opacity-50', 'pointer-events-none');
+        state.sim.insideCanvas = false;
+        state.sim.indexBpmMode = false;
+      }
+    });
+
+    function highlightActiveShapeButton(shapeName) {
+      document.querySelectorAll('.sim-shape-btn').forEach((b) => {
+        const isColSpan = b.getAttribute('data-shape') === 'lshape' ? ' col-span-2' : '';
+        if (b.getAttribute('data-shape') === shapeName) {
+          b.className = `sim-shape-btn py-1.5 rounded-lg bg-cyan-500/25 border border-cyan-400 text-white font-bold cursor-pointer${isColSpan}`;
+        } else {
+          b.className = `sim-shape-btn py-1.5 rounded-lg bg-slate-800/80 border border-white/10 text-slate-300 font-semibold cursor-pointer${isColSpan}`;
+        }
+      });
+    }
+
+    document.querySelectorAll('.sim-color-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.sim.color = btn.getAttribute('data-color');
+        document.querySelectorAll('.sim-color-btn').forEach(b => b.classList.remove('ring-2', 'ring-white'));
+        btn.classList.add('ring-2', 'ring-white');
+      });
+    });
+
+    document.querySelectorAll('.sim-shape-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const chosenShape = btn.getAttribute('data-shape');
+        state.sim.shape = chosenShape;
+        highlightActiveShapeButton(chosenShape);
+        selectShapeTab(chosenShape);
+      });
+    });
+
+    document.getElementById('simIndexBpmBtn').addEventListener('click', (e) => {
+      state.sim.indexBpmMode = !state.sim.indexBpmMode;
+      e.target.className = state.sim.indexBpmMode
+        ? 'py-1 px-1.5 rounded bg-cyan-500/30 border border-cyan-400 text-cyan-200 font-bold cursor-pointer'
+        : 'py-1 px-1.5 rounded bg-slate-800/90 border border-white/10 text-slate-300 hover:text-white cursor-pointer';
+    });
+
+    document.getElementById('simGenreGestureBtn').addEventListener('click', switchGenre);
+
+    document.getElementById('simFistResetBtn').addEventListener('click', () => {
+      clearAllLoops();
+      showToast('✊✊ All Loops Stopped');
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!state.sim.enabled) return;
+      const stageH = canvas.height - SCORE_HEIGHT;
+      state.sim.x = Math.max(0.05, Math.min(0.95, e.clientX / canvas.width));
+      state.sim.y = Math.max(0.08, Math.min(0.92, e.clientY / Math.max(1, stageH)));
+      state.sim.insideCanvas = e.clientY < stageH;
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+      state.sim.insideCanvas = false;
+    });
+
+    canvas.addEventListener('touchmove', (e) => {
+      if (!state.sim.enabled || !e.touches[0]) return;
+      const stageH = canvas.height - SCORE_HEIGHT;
+      state.sim.x = Math.max(0.05, Math.min(0.95, e.touches[0].clientX / canvas.width));
+      state.sim.y = Math.max(0.08, Math.min(0.92, e.touches[0].clientY / Math.max(1, stageH)));
+      state.sim.insideCanvas = e.touches[0].clientY < stageH;
+    }, { passive: true });
+
+    const analysisModal = document.getElementById('analysisModal');
+    document.getElementById('analysisBtn').addEventListener('click', () => {
+      analysisModal.classList.remove('hidden');
+      analysisModal.classList.add('flex');
+    });
+    document.getElementById('closeAnalysisBtn').addEventListener('click', () => {
+      analysisModal.classList.add('hidden');
+      analysisModal.classList.remove('flex');
+    });
+
+    function openDualMonitorWindow() {
+      if (dualWindow && !dualWindow.closed) { dualWindow.focus(); return; }
+      dualWindow = window.open('', 'GraphicScoreDualView', 'width=960,height=640');
+      if (!dualWindow) {
+        document.getElementById('popupModal').classList.remove('hidden');
+        document.getElementById('popupModal').classList.add('flex');
+        return;
+      }
+      dualWindow.document.write(`<!DOCTYPE html><html><head><title>Graphic Score - Monitor 2 Output</title><style>body{margin:0;overflow:hidden;background:#090a0f;}canvas{display:block;width:100vw;height:100vh;}</style></head><body><canvas id="dualCanvas"></canvas></body></html>`);
+      dualWindow.document.close();
+      dualCanvas = dualWindow.document.getElementById('dualCanvas');
+      dualCanvas.width = dualWindow.innerWidth;
+      dualCanvas.height = dualWindow.innerHeight;
+      dualCtx = dualCanvas.getContext('2d');
+      dualWindow.addEventListener('resize', () => {
+        if (dualCanvas) {
+          dualCanvas.width = dualWindow.innerWidth;
+          dualCanvas.height = dualWindow.innerHeight;
+        }
+      });
+    }
+    document.getElementById('dualPopupBtn').addEventListener('click', openDualMonitorWindow);
+    document.getElementById('handDualPopupBtn').addEventListener('click', openDualMonitorWindow);
+
+    document.getElementById('closeModalBtn').addEventListener('click', () => {
+      document.getElementById('popupModal').classList.add('hidden');
+      document.getElementById('popupModal').classList.remove('flex');
+    });
+  </script>
+</body>
+</html>
